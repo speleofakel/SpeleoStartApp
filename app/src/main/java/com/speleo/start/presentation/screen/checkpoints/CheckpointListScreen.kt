@@ -1,13 +1,8 @@
 package com.speleo.start.presentation.screen.checkpoints
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,28 +10,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.collectLatest
-
-fun filterDigitsPreserveCursor(oldValue: TextFieldValue, newValue: String, maxLength: Int): TextFieldValue {
-    val filtered = newValue.filter { it.isDigit() }.take(maxLength)
-    val removedCount = newValue.length - filtered.length
-    val newCursorPos = (oldValue.selection.start - removedCount).coerceIn(0, filtered.length)
-    return TextFieldValue(filtered, TextRange(newCursorPos))
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +34,7 @@ fun CheckpointListScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(competitionId) { vm.load(competitionId) }
+
     LaunchedEffect(Unit) {
         vm.event.collectLatest { event ->
             if (event is CheckpointListVM.UiEvent.ShowMessage) {
@@ -63,14 +47,25 @@ fun CheckpointListScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Настройка КП", fontWeight = FontWeight.Bold) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } },
-                actions = { IconButton(onClick = vm::reorderCheckpoints) { Icon(Icons.Default.Save, null) } }
+                title = { Text("Контрольные пункты", fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { vm.reorderCheckpoints() }) {
+                        Icon(Icons.Default.Save, contentDescription = "Сохранить порядок")
+                    }
+                }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = vm::showAddDialog, containerColor = MaterialTheme.colorScheme.primary) {
-                Icon(Icons.Default.Add, null, tint = Color.White)
+            FloatingActionButton(
+                onClick = { vm.showAddDialog() },
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
             }
         }
     ) { padding ->
@@ -79,35 +74,34 @@ fun CheckpointListScreen(
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             } else if (checkpoints.isEmpty()) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text("📋 Нет КП", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("📋 Нет контрольных пунктов", fontSize = 18.sp)
                     Text("Нажмите + для добавления", fontSize = 14.sp, color = Color.Gray)
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     itemsIndexed(checkpoints) { index, cp ->
                         CheckpointCard(
                             checkpoint = cp,
                             onToggleType = { vm.toggleCheckpointType(cp.id) },
-                            onToggleClass2 = { vm.toggleClass2(cp.id, cp.forClass2) },
-                            onToggleClass3 = { vm.toggleClass3(cp.id, cp.forClass3) },
+                            onToggleClass2 = { vm.toggleClass2(cp.id) },
+                            onToggleClass3 = { vm.toggleClass3(cp.id) },
                             onWeightChange = { vm.updateWeight(cp.id, it) },
                             onNormChange = { vm.updateNormative(cp.id, it) },
                             onPenaltyChange = { vm.updatePenalty(cp.id, it) },
-                            onToggleWait = { vm.toggleTrackWaitTime(cp.id, cp.trackWaitTime) },
+                            onToggleWait = { vm.toggleTrackWaitTime(cp.id) },
                             onMoveUp = if (index > 0) { { vm.moveCheckpoint(index, index - 1) } } else null,
                             onMoveDown = if (index < checkpoints.size - 1) { { vm.moveCheckpoint(index, index + 1) } } else null,
                             onDelete = { vm.deleteCheckpoint(cp.id) }
                         )
                     }
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
             }
         }
@@ -116,9 +110,8 @@ fun CheckpointListScreen(
     if (showAddDialog) {
         AddCheckpointDialog(
             onDismiss = { vm.hideAddDialog() },
-            onConfirm = { w, n, p, c2, c3 ->
-                vm.addCheckpoint(w, n, p, c2, c3)
-                vm.hideAddDialog()
+            onConfirm = { weight, normSeconds, penalty, forClass2, forClass3 ->
+                vm.addCheckpoint(weight, normSeconds, penalty, forClass2, forClass3)
             }
         )
     }
@@ -131,7 +124,7 @@ fun CheckpointCard(
     onToggleClass2: () -> Unit,
     onToggleClass3: () -> Unit,
     onWeightChange: (Int) -> Unit,
-    onNormChange: (String) -> Unit,
+    onNormChange: (Int) -> Unit,
     onPenaltyChange: (Int) -> Unit,
     onToggleWait: () -> Unit,
     onMoveUp: (() -> Unit)?,
@@ -139,369 +132,275 @@ fun CheckpointCard(
     onDelete: () -> Unit
 ) {
     val isTech = checkpoint.type == "technical"
-    val cardBg = Color(0xFF1E293B)
-    val focusManager = LocalFocusManager.current
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { focusManager.clearFocus() }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(1.dp, if (isTech) Color(0xFF38BDF8) else Color(0xFF334155)),
-            colors = CardDefaults.cardColors(containerColor = cardBg)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 12.dp, bottom = 12.dp)
-                    .padding(top = 24.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    SingleTypeToggle(isTech = isTech, onToggle = onToggleType)
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ClassPill(
-                            active = checkpoint.forClass2,
-                            text = "2-й кл",
-                            activeColor = Color(0xFF22C55E),
-                            onClick = onToggleClass2
-                        )
-                        ClassPill(
-                            active = checkpoint.forClass3,
-                            text = "3-й кл",
-                            activeColor = Color(0xFF38BDF8),
-                            onClick = onToggleClass3
-                        )
-                    }
-
-                    CompactDigitField(
-                        value = checkpoint.weight.toString(),
-                        maxLength = 2,
-                        onValueChange = { it.toIntOrNull()?.let(onWeightChange) },
-                        label = "Вес",
-                        modifier = Modifier.width(60.dp)
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        if (onMoveUp != null) {
-                            SmallIconBtn(Icons.Default.ArrowUpward, enabled = true, onClick = onMoveUp)
-                        }
-                        if (onMoveDown != null) {
-                            SmallIconBtn(Icons.Default.ArrowDownward, enabled = true, onClick = onMoveDown)
-                        }
-                        SmallIconBtn(Icons.Default.Delete, enabled = true, color = Color(0xFFEF4444), onClick = onDelete)
-                    }
-                }
-
-                if (isTech) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    HorizontalDivider(color = Color(0xFF334155), thickness = 0.5.dp)
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("⏳", fontSize = 14.sp)
-                        CompactDigitField(
-                            value = checkpoint.normativeSeconds ?: "0",
-                            maxLength = 3,
-                            onValueChange = onNormChange,
-                            modifier = Modifier.width(70.dp)
-                        )
-                        Text("сек", fontSize = 11.sp, color = Color(0xFF94A3B8))
-
-                        Spacer(Modifier.weight(1f))
-
-                        Text("⚡", fontSize = 14.sp)
-                        CompactDigitField(
-                            value = (checkpoint.bonusPoints ?: 0).toString(),
-                            maxLength = 1,
-                            onValueChange = { it.toIntOrNull()?.let(onPenaltyChange) },
-                            modifier = Modifier.width(45.dp)
-                        )
-
-                        Spacer(Modifier.weight(1f))
-
-                        Text("⏱️", fontSize = 14.sp)
-                        Text(
-                            text = if (checkpoint.trackWaitTime) "Да" else "Нет",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (checkpoint.trackWaitTime) Color(0xFF38BDF8) else Color(0xFF64748B),
-                            modifier = Modifier.clickable {
-                                onToggleWait()
-                                focusManager.clearFocus()
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        Text(
-            text = "${checkpoint.displayNumber}",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (isTech) Color(0xFF38BDF8) else Color(0xFF94A3B8),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset(x = 16.dp, y = (-12).dp)
-                .background(
-                    color = cardBg,
-                    shape = RoundedCornerShape(8.dp)
-                )
-                .padding(horizontal = 8.dp, vertical = 0.dp)
-        )
-    }
-}
-
-@Composable
-fun SingleTypeToggle(isTech: Boolean, onToggle: () -> Unit) {
-    val bg = if (isTech) Color(0xFF38BDF8) else Color.Transparent
-    val border = if (isTech) Color(0xFF38BDF8) else Color(0xFF475569)
-    val text = if (isTech) Color.Black else Color(0xFF94A3B8)
-
-    Surface(
-        modifier = Modifier
-            .clickable { onToggle() }
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, border, RoundedCornerShape(8.dp))
-            .background(bg)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        color = Color.Transparent
-    ) {
-        Text(text = if (isTech) "ТХ" else "КП", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = text)
-    }
-}
-
-@Composable
-fun ClassPill(active: Boolean, text: String, activeColor: Color, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.clickable { onClick() },
-        shape = RoundedCornerShape(6.dp),
-        color = if (active) activeColor.copy(alpha = 0.15f) else Color.Transparent,
-        border = BorderStroke(1.dp, if (active) activeColor else Color(0xFF475569))
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            fontSize = 10.sp,
-            color = if (active) activeColor else Color(0xFF64748B),
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-        )
-    }
-}
-
-@Composable
-fun CompactDigitField(
-    value: String,
-    maxLength: Int,
-    onValueChange: (String) -> Unit,
-    label: String = "",
-    modifier: Modifier = Modifier
-) {
-    var textFieldValue by remember(value) {
-        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
-    }
-    var isFocused by remember { mutableStateOf(false) }
-    val focusManager = LocalFocusManager.current
-
-    LaunchedEffect(value) {
-        if (textFieldValue.text != value) {
-            textFieldValue = TextFieldValue(value, TextRange(value.length))
-        }
-    }
-
-    // Убираем фокус при нажатии Enter или при потере фокуса
-    val onValueChange = { newTfv: TextFieldValue ->
-        val updated = filterDigitsPreserveCursor(textFieldValue, newTfv.text, maxLength)
-        textFieldValue = updated
-        if (updated.text != value) {
-            onValueChange(updated.text)
-        }
-    }
-
-    Box(modifier = modifier.height(36.dp)) {
-        OutlinedTextField(
-            value = textFieldValue,
-            onValueChange = onValueChange,
-            modifier = Modifier
-                .fillMaxSize()
-                .onFocusChanged { focusState ->
-                    isFocused = focusState.isFocused
-                    if (!focusState.isFocused && textFieldValue.text.isNotEmpty()) {
-                        // При потере фокуса перемещаем курсор в конец
-                        textFieldValue = textFieldValue.copy(selection = TextRange(textFieldValue.text.length))
-                    }
-                },
-            textStyle = LocalTextStyle.current.copy(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                color = Color.White
-            ),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF38BDF8),
-                unfocusedBorderColor = Color(0xFF334155),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = Color(0xFF38BDF8),
-                focusedSupportingTextColor = Color.Transparent,
-                unfocusedSupportingTextColor = Color.Transparent
-            ),
-            shape = RoundedCornerShape(6.dp)
-        )
-
-        // Кастомный лейбл поверх поля
-        if (label.isNotEmpty() && !isFocused && value.isEmpty()) {
-            Text(
-                text = label,
-                fontSize = 10.sp,
-                color = Color(0xFF64748B),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 4.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun SmallIconBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean, color: Color = Color(0xFF94A3B8), onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(28.dp)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) color else Color(0xFF334155),
-            modifier = Modifier.size(16.dp)
-        )
-    }
-}
-
-@Composable
-fun AddCheckpointDialog(onDismiss: () -> Unit, onConfirm: (Int, Int, Int, Boolean, Boolean) -> Unit) {
-    var weight by remember { mutableStateOf("1") }
-    var norm by remember { mutableStateOf("00:00") }
-    var pen by remember { mutableStateOf("0") }
-    var c2 by remember { mutableStateOf(true) }
-    var c3 by remember { mutableStateOf(true) }
-    val focusManager = LocalFocusManager.current
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
-                .clickable { focusManager.clearFocus() },
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            // Строка 1: Номер + кнопки классов + Вес
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("➕ Добавить КП", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-
-                OutlinedTextField(
-                    value = weight,
-                    onValueChange = { if (it.all { c -> c.isDigit() }) weight = it },
-                    label = { Text("Вес", color = Color(0xFF94A3B8)) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
-                        cursorColor = Color(0xFF38BDF8)
+                // Номер и тип
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "№${checkpoint.displayNumber}",
+                        fontSize = 18.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                     )
-                )
 
-                OutlinedTextField(
-                    value = norm,
-                    onValueChange = { norm = it },
-                    label = { Text("Норматив (ММ:СС)", color = Color(0xFF94A3B8)) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
-                        cursorColor = Color(0xFF38BDF8)
-                    )
-                )
-
-                OutlinedTextField(
-                    value = pen,
-                    onValueChange = { if (it.all { c -> c.isDigit() }) pen = it },
-                    label = { Text("Штраф", color = Color(0xFF94A3B8)) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
-                        cursorColor = Color(0xFF38BDF8)
-                    )
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = c2,
-                            onCheckedChange = { c2 = it },
-                            colors = CheckboxDefaults.colors(checkmarkColor = Color.White)
+                    // Кнопка переключения типа (КП/ТХ)
+                    FilterChip(
+                        selected = isTech,
+                        onClick = onToggleType,
+                        label = { Text(if (isTech) "ТЕХ" else "КП", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFB45309),
+                            selectedLabelColor = Color.White
                         )
-                        Text("2-й класс", color = Color.White)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = c3,
-                            onCheckedChange = { c3 = it },
-                            colors = CheckboxDefaults.colors(checkmarkColor = Color.White)
-                        )
-                        Text("3-й класс", color = Color.White)
-                    }
+                    )
                 }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Отмена", color = Color(0xFF94A3B8)) }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            focusManager.clearFocus()
-                            onConfirm(
-                                weight.toIntOrNull() ?: 1,
-                                parseNorm(norm),
-                                pen.toIntOrNull() ?: 0,
-                                c2,
-                                c3
-                            )
-                        }
-                    ) {
-                        Text("Добавить")
+                // Кнопки классов
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = checkpoint.forClass2,
+                        onClick = onToggleClass2,
+                        label = { Text("2-й", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                    FilterChip(
+                        selected = checkpoint.forClass3,
+                        onClick = onToggleClass3,
+                        label = { Text("3-й", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Вес (редактируемый)
+                CompactNumberField(
+                    value = checkpoint.weight,
+                    onValueChange = onWeightChange,
+                    label = "Вес",
+                    modifier = Modifier.width(70.dp)
+                )
+            }
+
+            // Строка 2: технические параметры (если есть)
+            if (isTech) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Норматив (секунды -> ММ:СС)
+                    CompactNormField(
+                        seconds = checkpoint.normativeSeconds ?: 0,
+                        onValueChange = onNormChange,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Штраф
+                    CompactNumberField(
+                        value = checkpoint.bonusPoints ?: 0,
+                        onValueChange = onPenaltyChange,
+                        label = "Штраф",
+                        modifier = Modifier.width(70.dp)
+                    )
+
+                    // Отсечка
+                    FilterChip(
+                        selected = checkpoint.trackWaitTime,
+                        onClick = onToggleWait,
+                        label = { Text(if (checkpoint.trackWaitTime) "Отс. Да" else "Отс. Нет", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp)
+                    )
+                }
+            }
+
+            // Строка 3: кнопки управления
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (onMoveUp != null) {
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = "Вверх", modifier = Modifier.size(18.dp))
                     }
+                }
+                if (onMoveDown != null) {
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = "Вниз", modifier = Modifier.size(18.dp))
+                    }
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Удалить", modifier = Modifier.size(18.dp), tint = Color.Red)
                 }
             }
         }
     }
 }
 
-private fun parseNorm(input: String): Int {
+@Composable
+fun CompactNumberField(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { newText ->
+            if (newText.all { it.isDigit() } && newText.length <= 3) {
+                text = newText
+                val intValue = newText.toIntOrNull()
+                if (intValue != null && intValue != value) {
+                    onValueChange(intValue)
+                }
+            }
+        },
+        label = { Text(label, fontSize = 10.sp) },
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, textAlign = TextAlign.Center)
+    )
+}
+
+@Composable
+fun CompactNormField(
+    seconds: Int,
+    onValueChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var text by remember(seconds) {
+        mutableStateOf(formatSecondsToMmSs(seconds))
+    }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { newText ->
+            val filtered = newText.filter { it.isDigit() || it == ':' }
+            if (filtered.length <= 5) {
+                text = filtered
+                val parsed = parseMmSsToSeconds(filtered)
+                if (parsed != null && parsed != seconds) {
+                    onValueChange(parsed)
+                }
+            }
+        },
+        label = { Text("Норматив", fontSize = 10.sp) },
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, textAlign = TextAlign.Center)
+    )
+}
+
+private fun formatSecondsToMmSs(totalSeconds: Int): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
+}
+
+private fun parseMmSsToSeconds(input: String): Int? {
     val parts = input.split(":")
     return if (parts.size == 2) {
-        (parts[0].toIntOrNull() ?: 0) * 60 + (parts[1].toIntOrNull() ?: 0)
+        val minutes = parts[0].toIntOrNull() ?: return null
+        val seconds = parts[1].toIntOrNull() ?: return null
+        if (seconds in 0..59) minutes * 60 + seconds else null
     } else {
-        input.toIntOrNull() ?: 0
+        input.toIntOrNull()
     }
+}
+
+@Composable
+fun AddCheckpointDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (weight: Int, normSeconds: Int, penalty: Int, forClass2: Boolean, forClass3: Boolean) -> Unit
+) {
+    var weight by remember { mutableStateOf("5") }
+    var normSeconds by remember { mutableStateOf("60") }
+    var penalty by remember { mutableStateOf("0") }
+    var forClass2 by remember { mutableStateOf(true) }
+    var forClass3 by remember { mutableStateOf(true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("➕ Добавить контрольный пункт") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = weight,
+                    onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 3) weight = it },
+                    label = { Text("Вес (баллы)") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = normSeconds,
+                    onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 3) normSeconds = it },
+                    label = { Text("Норматив (секунды)") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = penalty,
+                    onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 2) penalty = it },
+                    label = { Text("Штраф") },
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = forClass2, onCheckedChange = { forClass2 = it })
+                        Text("2-й класс")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = forClass3, onCheckedChange = { forClass3 = it })
+                        Text("3-й класс")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val w = weight.toIntOrNull() ?: 1
+                    val norm = normSeconds.toIntOrNull() ?: 0
+                    val pen = penalty.toIntOrNull() ?: 0
+                    if (w in 1..999 && (forClass2 || forClass3)) {
+                        onConfirm(w, norm, pen, forClass2, forClass3)
+                    }
+                },
+                enabled = (weight.toIntOrNull() ?: 0) in 1..999 && (forClass2 || forClass3)
+            ) { Text("Добавить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
