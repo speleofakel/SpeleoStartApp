@@ -31,6 +31,7 @@ import com.speleo.start.presentation.screen.teamlist.TeamListScreen
 import com.speleo.start.ui.theme.SpeleoStartTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -48,6 +49,13 @@ class MainActivity : ComponentActivity() {
                         composable(Screen.Home.route) {
                             HomeScreen(onNavigate = { screen -> navController.navigate(screen.route) })
                         }
+                        composable(Screen.PersonDetail.route) { backStackEntry ->
+                            val personId = backStackEntry.arguments?.getString("personId")?.toLongOrNull() ?: -1L
+                            PersonDetailScreen(
+                                personId = personId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                         composable(Screen.Competitions.route) {
                             CompetitionListScreen(
                                 onBack = { navController.popBackStack() },
@@ -61,6 +69,7 @@ class MainActivity : ComponentActivity() {
                                 onSaved = { navController.popBackStack() }
                             )
                         }
+
                         composable(
                             route = Screen.CompetitionSettings.route,
                             arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
@@ -85,7 +94,10 @@ class MainActivity : ComponentActivity() {
                         composable(Screen.Persons.route) {
                             PersonListScreen(
                                 onBack = { navController.popBackStack() },
-                                onAddNew = { navController.navigate(Screen.PersonNew.route) }
+                                onAddNew = { navController.navigate(Screen.PersonNew.route) },
+                                onPersonClick = { personId ->
+                                    navController.navigate(Screen.PersonDetail.createRoute(personId))
+                                }
                             )
                         }
                         composable(Screen.PersonNew.route) {

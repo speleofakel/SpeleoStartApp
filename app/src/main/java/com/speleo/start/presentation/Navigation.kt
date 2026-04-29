@@ -6,6 +6,9 @@ sealed class Screen(val route: String) {
     object RouteCardDetail : Screen("route_card_detail/{teamId}") {
         fun pass(id: Long) = "route_card_detail/$id"
     }
+    object PersonDetail : Screen("person_detail/{personId}") {
+        fun createRoute(personId: Long) = "person_detail/$personId"
+    }
     object Start : Screen("start")
     object Finish : Screen("finish")
     object Register : Screen("register")

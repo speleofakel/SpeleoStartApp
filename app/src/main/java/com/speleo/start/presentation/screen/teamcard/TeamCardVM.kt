@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.entity.*
 import com.speleo.start.data.repository.*
+import com.speleo.start.util.AgeCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -54,7 +55,6 @@ class TeamCardVM @Inject constructor(
             val team = teamRepo.getTeamById(teamId) ?: return@launch
             val participants = participantRepo.getAllParticipantsByTeam(teamId)
 
-            // Ждём первый эмит из Flow
             val members = mutableListOf<TeamCardMember>()
             participants.first().forEach { p ->
                 val person = personRepo.getPersonById(p.personId)
@@ -62,17 +62,7 @@ class TeamCardVM @Inject constructor(
                 val mentorPerson = if (mentor != null) personRepo.getPersonById(mentor.personId) else null
 
                 if (person != null) {
-                    val age = person.birthDate?.let { birth ->
-                        try {
-                            val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                            val birthDate = sdf.parse(birth)
-                            val today = java.util.Calendar.getInstance()
-                            val birthCal = java.util.Calendar.getInstance().apply { time = birthDate!! }
-                            var a = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                            if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) a--
-                            a
-                        } catch (e: Exception) { null }
-                    }
+                    val age = AgeCalculator.calculateAge(person.birthDate)
 
                     members.add(
                         TeamCardMember(

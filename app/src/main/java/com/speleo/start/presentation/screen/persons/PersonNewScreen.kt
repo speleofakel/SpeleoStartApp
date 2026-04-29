@@ -19,6 +19,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.PhoneFormatter
 import java.util.Calendar
+import com.speleo.start.presentation.component.TitleCaseTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +31,8 @@ fun PersonNewScreen(
     var lastName by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var middleName by remember { mutableStateOf("") }
-    var showMiddleName by remember { mutableStateOf(false) }
+    var nickname by remember { mutableStateOf("") }
+    var showExtraFields by remember { mutableStateOf(false) }
     var birthDate by remember { mutableStateOf("") }
     var noBirthDate by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
@@ -70,24 +72,42 @@ fun PersonNewScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Фамилия
-            OutlinedTextField(
-                value = lastName, onValueChange = { lastName = it },
-                label = { Text("Фамилия") }, modifier = Modifier.fillMaxWidth(), singleLine = true
+            TitleCaseTextField(
+                value = lastName,
+                onValueChange = { lastName = it },
+                label = "Фамилия",
+                modifier = Modifier.fillMaxWidth()
             )
             // Имя
-            OutlinedTextField(
-                value = firstName, onValueChange = { firstName = it },
-                label = { Text("Имя") }, modifier = Modifier.fillMaxWidth(), singleLine = true
+            TitleCaseTextField(
+                value = firstName,
+                onValueChange = { firstName = it },
+                label = "Имя",
+                modifier = Modifier.fillMaxWidth()
             )
-            // Отчество (скрытое)
-            TextButton(onClick = { showMiddleName = !showMiddleName }) {
-                Text(if (showMiddleName) "▾ Отчество" else "▸ Отчество")
+            // Отчество (скрытое, но тоже TitleCase)
+            // Скрытые поля: Отчество + Позывной
+            var showExtraFields by remember { mutableStateOf(false) }
+
+            TextButton(onClick = { showExtraFields = !showExtraFields }) {
+                Text(if (showExtraFields) "▾ Дополнительно" else "▸ Дополнительно")
             }
-            AnimatedVisibility(visible = showMiddleName) {
-                OutlinedTextField(
-                    value = middleName, onValueChange = { middleName = it },
-                    label = { Text("Отчество") }, modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
+            AnimatedVisibility(visible = showExtraFields) {
+                Column {
+                    TitleCaseTextField(
+                        value = middleName,
+                        onValueChange = { middleName = it },
+                        label = "Отчество",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TitleCaseTextField(
+                        value = nickname,
+                        onValueChange = { nickname = it },
+                        label = "Позывной",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
             // Дата рождения
             if (!noBirthDate) {
@@ -150,11 +170,13 @@ fun PersonNewScreen(
             Button(
                 onClick = {
                     vm.savePerson(
-                        lastName, firstName,
-                        middleName.ifBlank { null },
-                        if (noBirthDate) null else birthDate.ifBlank { null },
-                        phone.ifBlank { null }, gender,
-                        canBeMentor = age != null && age >= 18,
+                        lastName = lastName,
+                        firstName = firstName,
+                        middleName = middleName.ifBlank { null },
+                        nickname = nickname.ifBlank { null },  // ← НОВОЕ
+                        birthDate = if (noBirthDate) null else birthDate.ifBlank { null },
+                        phone = phone.ifBlank { null },
+                        gender = gender
                     ) { onSaved() }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -168,21 +190,45 @@ fun PersonNewScreen(
 
 @Composable
 fun DateOfBirthField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
-    var state by remember { mutableStateOf(TextFieldValue(value)) }
-    LaunchedEffect(value) { if (value != state.text) state = TextFieldValue(value, TextRange(value.length)) }
+    // НЕ используем remember(value) — храним состояние отдельно
+    var state by remember {
+        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
+    }
+
+    // Синхронизация только извне
+    LaunchedEffect(value) {
+        if (state.text != value) {
+            state = TextFieldValue(value, TextRange(value.length))
+        }
+    }
 
     OutlinedTextField(
         value = state,
         onValueChange = { newVal ->
             val formatted = DateValidator.formatAsYouType(newVal.text)
-            val digitsBefore = newVal.text.take(newVal.selection.start).count { it.isDigit() }
-            val dots = (digitsBefore / 2).coerceAtMost(2)
-            val newCursor = minOf(digitsBefore + dots, formatted.length)
-            state = newVal.copy(text = formatted, selection = TextRange(newCursor))
+
+            // Если форматирование не изменило текст — просто обновляем
+            if (formatted == newVal.text) {
+                state = newVal
+                if (formatted != value) onValueChange(formatted)
+                return@OutlinedTextField
+            }
+
+            // Пересчитываем позицию курсора
+            val oldCursor = newVal.selection.start
+            val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
+            val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
+            val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
+
+            state = newVal.copy(
+                text = formatted,
+                selection = TextRange(newCursor)
+            )
             if (formatted != value) onValueChange(formatted)
         },
         label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
-        modifier = modifier, singleLine = true,
+        modifier = modifier,
+        singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
     )
 }

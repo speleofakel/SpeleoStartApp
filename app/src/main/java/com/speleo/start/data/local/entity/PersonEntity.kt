@@ -10,7 +10,7 @@ data class PersonEntity(
     val lastName: String,
     val firstName: String,
     val middleName: String? = null,
-    val nickname: String? = null,      // ← НОВОЕ ПОЛЕ
+    val nickname: String? = null,
     val birthDate: String? = null,
     val phone: String? = null,
     val email: String? = null,
@@ -18,6 +18,7 @@ data class PersonEntity(
     val note: String? = null,
     val blacklisted: Boolean = false,
     val blacklistReason: String? = null,
-    val canBeMentor: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val photoUri: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )

@@ -16,6 +16,7 @@ class PersonNewVM @Inject constructor(
         lastName: String,
         firstName: String,
         middleName: String?,
+        nickname: String?,
         birthDate: String?,
         phone: String?,
         gender: String?,
@@ -26,29 +27,7 @@ class PersonNewVM @Inject constructor(
                 lastName = lastName,
                 firstName = firstName,
                 middleName = middleName,
-                birthDate = birthDate,
-                phone = phone,
-                gender = gender
-            )
-            onSuccess()
-        }
-
-    }
-    fun savePerson(
-        lastName: String,
-        firstName: String,
-        middleName: String?,
-        birthDate: String?,
-        phone: String?,
-        gender: String?,
-        canBeMentor: Boolean,
-        onSuccess: () -> Unit
-    ) {
-        viewModelScope.launch {
-            repository.createPerson(
-                lastName = lastName,
-                firstName = firstName,
-                middleName = middleName,
+                nickname = nickname,
                 birthDate = birthDate,
                 phone = phone,
                 gender = gender

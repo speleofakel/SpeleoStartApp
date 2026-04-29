@@ -77,7 +77,7 @@ class TestDataGenerator @Inject constructor(
                     val pid = personDao.insert(PersonEntity(
                         lastName = ln, firstName = fn, middleName = if(random.nextBoolean()) "${fn}ович" else null,
                         nickname = nicks[i], birthDate = birth, phone = phone,
-                        gender = if(isMale) "male" else "female", canBeMentor = age >= 18
+                        gender = if(isMale) "male" else "female"
                     ))
                     if (pid > 0) personIds.add(pid)
                 }
