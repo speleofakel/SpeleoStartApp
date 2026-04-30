@@ -1,0 +1,2557 @@
+app/src/main/java/com/speleo/start/presentation/screen/checkpoints/CheckpointListScreen.kt>>>
+package com.speleo.start.presentation.screen.checkpoints
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.collectLatest
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CheckpointListScreen(
+    competitionId: Long,
+    onBack: () -> Unit,
+    vm: CheckpointListVM = hiltViewModel()
+) {
+    val checkpoints by vm.checkpoints.collectAsStateWithLifecycle()
+    val isLoading by vm.isLoading.collectAsStateWithLifecycle()
+    val showAddDialog by vm.showAddDialogState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(competitionId) { vm.load(competitionId) }
+
+    LaunchedEffect(Unit) {
+        vm.event.collectLatest { event ->
+            if (event is CheckpointListVM.UiEvent.ShowMessage) {
+                snackbarHostState.showSnackbar(event.message)
+            }
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Контрольные пункты", fontSize = 18.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { vm.reorderCheckpoints() }) {
+                        Icon(Icons.Default.Save, contentDescription = "Сохранить порядок")
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { vm.showAddDialog() },
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить", tint = Color.White)
+            }
+        }
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else if (checkpoints.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("📋 Нет контрольных пунктов", fontSize = 18.sp)
+                    Text("Нажмите + для добавления", fontSize = 14.sp, color = Color.Gray)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(checkpoints) { index, cp ->
+                        CheckpointCard(
+                            checkpoint = cp,
+                            onToggleType = { vm.toggleCheckpointType(cp.id) },
+                            onToggleClass2 = { vm.toggleClass2(cp.id) },
+                            onToggleClass3 = { vm.toggleClass3(cp.id) },
+                            onWeightChange = { vm.updateWeight(cp.id, it) },
+                            onNormChange = { vm.updateNormative(cp.id, it) },
+                            onPenaltyChange = { vm.updatePenalty(cp.id, it) },
+                            onToggleWait = { vm.toggleTrackWaitTime(cp.id) },
+                            onMoveUp = if (index > 0) { { vm.moveCheckpoint(index, index - 1) } } else null,
+                            onMoveDown = if (index < checkpoints.size - 1) { { vm.moveCheckpoint(index, index + 1) } } else null,
+                            onDelete = { vm.deleteCheckpoint(cp.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AddCheckpointDialog(
+            onDismiss = { vm.hideAddDialog() },
+            onConfirm = { weight, normSeconds, penalty, forClass2, forClass3 ->
+                vm.addCheckpoint(weight, normSeconds, penalty, forClass2, forClass3)
+            }
+        )
+    }
+}
+
+@Composable
+fun CheckpointCard(
+    checkpoint: CheckpointItem,
+    onToggleType: () -> Unit,
+    onToggleClass2: () -> Unit,
+    onToggleClass3: () -> Unit,
+    onWeightChange: (Int) -> Unit,
+    onNormChange: (Int) -> Unit,
+    onPenaltyChange: (Int) -> Unit,
+    onToggleWait: () -> Unit,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
+    onDelete: () -> Unit
+) {
+    val isTech = checkpoint.type == "technical"
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Строка 1: Номер + кнопки классов + Вес
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Номер и тип
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "№${checkpoint.displayNumber}",
+                        fontSize = 18.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+
+                    // Кнопка переключения типа (КП/ТХ)
+                    FilterChip(
+                        selected = isTech,
+                        onClick = onToggleType,
+                        label = { Text(if (isTech) "ТЕХ" else "КП", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFB45309),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+
+                // Кнопки классов
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = checkpoint.forClass2,
+                        onClick = onToggleClass2,
+                        label = { Text("2-й", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                    FilterChip(
+                        selected = checkpoint.forClass3,
+                        onClick = onToggleClass3,
+                        label = { Text("3-й", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Вес (редактируемый)
+                CompactNumberField(
+                    value = checkpoint.weight,
+                    onValueChange = onWeightChange,
+                    label = "Вес",
+                    modifier = Modifier.width(70.dp)
+                )
+            }
+
+            // Строка 2: технические параметры (если есть)
+            if (isTech) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Норматив (секунды -> ММ:СС)
+                    CompactNormField(
+                        seconds = checkpoint.normativeSeconds ?: 0,
+                        onValueChange = onNormChange,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Штраф
+                    CompactNumberField(
+                        value = checkpoint.bonusPoints ?: 0,
+                        onValueChange = onPenaltyChange,
+                        label = "Штраф",
+                        modifier = Modifier.width(70.dp)
+                    )
+
+                    // Отсечка
+                    FilterChip(
+                        selected = checkpoint.trackWaitTime,
+                        onClick = onToggleWait,
+                        label = { Text(if (checkpoint.trackWaitTime) "Отс. Да" else "Отс. Нет", fontSize = 11.sp) },
+                        modifier = Modifier.height(32.dp)
+                    )
+                }
+            }
+
+            // Строка 3: кнопки управления
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (onMoveUp != null) {
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = "Вверх", modifier = Modifier.size(18.dp))
+                    }
+                }
+                if (onMoveDown != null) {
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = "Вниз", modifier = Modifier.size(18.dp))
+                    }
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Удалить", modifier = Modifier.size(18.dp), tint = Color.Red)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactNumberField(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { newText ->
+            if (newText.all { it.isDigit() } && newText.length <= 3) {
+                text = newText
+                val intValue = newText.toIntOrNull()
+                if (intValue != null && intValue != value) {
+                    onValueChange(intValue)
+                }
+            }
+        },
+        label = { Text(label, fontSize = 10.sp) },
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, textAlign = TextAlign.Center)
+    )
+}
+
+@Composable
+fun CompactNormField(
+    seconds: Int,
+    onValueChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var text by remember(seconds) {
+        mutableStateOf(formatSecondsToMmSs(seconds))
+    }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { newText ->
+            val filtered = newText.filter { it.isDigit() || it == ':' }
+            if (filtered.length <= 5) {
+                text = filtered
+                val parsed = parseMmSsToSeconds(filtered)
+                if (parsed != null && parsed != seconds) {
+                    onValueChange(parsed)
+                }
+            }
+        },
+        label = { Text("Норматив", fontSize = 10.sp) },
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, textAlign = TextAlign.Center)
+    )
+}
+
+private fun formatSecondsToMmSs(totalSeconds: Int): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
+}
+
+private fun parseMmSsToSeconds(input: String): Int? {
+    val parts = input.split(":")
+    return if (parts.size == 2) {
+        val minutes = parts[0].toIntOrNull() ?: return null
+        val seconds = parts[1].toIntOrNull() ?: return null
+        if (seconds in 0..59) minutes * 60 + seconds else null
+    } else {
+        input.toIntOrNull()
+    }
+}
+
+@Composable
+fun AddCheckpointDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (weight: Int, normSeconds: Int, penalty: Int, forClass2: Boolean, forClass3: Boolean) -> Unit
+) {
+    var weight by remember { mutableStateOf("5") }
+    var normSeconds by remember { mutableStateOf("60") }
+    var penalty by remember { mutableStateOf("0") }
+    var forClass2 by remember { mutableStateOf(true) }
+    var forClass3 by remember { mutableStateOf(true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("➕ Добавить контрольный пункт") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = weight,
+                    onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 3) weight = it },
+                    label = { Text("Вес (баллы)") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = normSeconds,
+                    onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 3) normSeconds = it },
+                    label = { Text("Норматив (секунды)") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = penalty,
+                    onValueChange = { if (it.all { c -> c.isDigit() } && it.length <= 2) penalty = it },
+                    label = { Text("Штраф") },
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = forClass2, onCheckedChange = { forClass2 = it })
+                        Text("2-й класс")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = forClass3, onCheckedChange = { forClass3 = it })
+                        Text("3-й класс")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val w = weight.toIntOrNull() ?: 1
+                    val norm = normSeconds.toIntOrNull() ?: 0
+                    val pen = penalty.toIntOrNull() ?: 0
+                    if (w in 1..999 && (forClass2 || forClass3)) {
+                        onConfirm(w, norm, pen, forClass2, forClass3)
+                    }
+                },
+                enabled = (weight.toIntOrNull() ?: 0) in 1..999 && (forClass2 || forClass3)
+            ) { Text("Добавить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/checkpoints/CheckpointListVM.kt>>>
+package com.speleo.start.presentation.screen.checkpoints
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.MasterRouteCardRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class CheckpointListVM @Inject constructor(
+    private val repository: MasterRouteCardRepository
+) : ViewModel() {
+
+    private var competitionId: Long = -1L
+
+    private val _checkpoints = MutableStateFlow<List<CheckpointItem>>(emptyList())
+    val checkpoints: StateFlow<List<CheckpointItem>> = _checkpoints.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _showAddDialog = MutableStateFlow(false)
+    val showAddDialogState: StateFlow<Boolean> = _showAddDialog.asStateFlow()
+
+    private val _event = MutableSharedFlow<UiEvent>()
+    val event: SharedFlow<UiEvent> = _event.asSharedFlow()
+
+    sealed class UiEvent {
+        data class ShowMessage(val message: String) : UiEvent()
+    }
+
+    fun load(id: Long) {
+        competitionId = id
+        viewModelScope.launch {
+            _isLoading.value = true
+            repository.getRouteCardByCompetition(id).collect { entities ->
+                _checkpoints.value = entities.mapIndexed { index, entity ->
+                    CheckpointItem(
+                        id = entity.id,
+                        displayNumber = index + 1,
+                        weight = entity.weight,
+                        type = entity.type,
+                        sortOrder = entity.sortOrder,
+                        normativeSeconds = entity.normativeSeconds,
+                        bonusPoints = entity.bonusPoints,
+                        trackWaitTime = entity.trackWaitTime,
+                        trackExecutionTime = entity.trackExecutionTime,
+                        forClass2 = entity.forClass2,
+                        forClass3 = entity.forClass3
+                    )
+                }
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun addCheckpoint(weight: Int, normativeSeconds: Int, penalty: Int, forClass2: Boolean, forClass3: Boolean) {
+        viewModelScope.launch {
+            val nextSort = (_checkpoints.value.maxOfOrNull { it.sortOrder } ?: 0) + 1
+            val id = repository.addCheckpoint(
+                competitionId = competitionId,
+                displayNumber = nextSort,
+                weight = weight,
+                type = "normal",
+                sortOrder = nextSort,
+                normativeSeconds = normativeSeconds,
+                forClass2 = forClass2,
+                forClass3 = forClass3,
+                trackWaitTime = false,
+                trackExecutionTime = false,
+                bonusPoints = penalty
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("КП добавлен"))
+                load(competitionId) // Перезагрузка для обновления порядка
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка при добавлении КП"))
+            }
+        }
+    }
+
+    fun updateWeight(id: Long, newWeight: Int) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            if (entity.weight != newWeight) {
+                repository.updateCheckpoint(entity.copy(weight = newWeight))
+                _event.emit(UiEvent.ShowMessage("Вес обновлён"))
+            }
+        }
+    }
+
+    fun updateNormative(id: Long, seconds: Int) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            if (entity.normativeSeconds != seconds) {
+                repository.updateCheckpoint(entity.copy(normativeSeconds = seconds))
+                _event.emit(UiEvent.ShowMessage("Норматив обновлён"))
+            }
+        }
+    }
+
+    fun updatePenalty(id: Long, penalty: Int) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            if (entity.bonusPoints != penalty) {
+                repository.updateCheckpoint(entity.copy(bonusPoints = penalty))
+                _event.emit(UiEvent.ShowMessage("Штраф обновлён"))
+            }
+        }
+    }
+
+    fun toggleCheckpointType(id: Long) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            val newType = if (entity.type == "normal") "technical" else "normal"
+            val updated = entity.copy(
+                type = newType,
+                trackWaitTime = newType == "technical",
+                normativeSeconds = if (newType == "technical") 60 else 0,
+                bonusPoints = if (newType == "technical") 0 else 0
+            )
+            repository.updateCheckpoint(updated)
+            _event.emit(UiEvent.ShowMessage(if (newType == "technical") "КП стал техническим" else "КП стал обычным"))
+        }
+    }
+
+    fun toggleClass2(id: Long) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            repository.updateCheckpoint(entity.copy(forClass2 = !entity.forClass2))
+        }
+    }
+
+    fun toggleClass3(id: Long) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            repository.updateCheckpoint(entity.copy(forClass3 = !entity.forClass3))
+        }
+    }
+
+    fun toggleTrackWaitTime(id: Long) {
+        viewModelScope.launch {
+            val entity = repository.getCheckpointById(id) ?: return@launch
+            repository.updateCheckpoint(entity.copy(trackWaitTime = !entity.trackWaitTime))
+            _event.emit(UiEvent.ShowMessage("Отсечка ${if (!entity.trackWaitTime) "включена" else "выключена"}"))
+        }
+    }
+
+    fun deleteCheckpoint(id: Long) {
+        viewModelScope.launch {
+            try {
+                repository.deleteCheckpoint(id)
+                _event.emit(UiEvent.ShowMessage("КП удалён"))
+                load(competitionId)
+            } catch (e: Exception) {
+                _event.emit(UiEvent.ShowMessage("Ошибка при удалении: ${e.message}"))
+            }
+        }
+    }
+
+    fun moveCheckpoint(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+
+        val current = _checkpoints.value.toMutableList()
+        val item = current.removeAt(fromIndex)
+        current.add(toIndex, item)
+
+        viewModelScope.launch {
+            current.forEachIndexed { index, cp ->
+                val entity = repository.getCheckpointById(cp.id) ?: return@forEachIndexed
+                val newSortOrder = index + 1
+                if (entity.sortOrder != newSortOrder) {
+                    repository.updateCheckpoint(entity.copy(sortOrder = newSortOrder, displayNumber = newSortOrder))
+                }
+            }
+            _event.emit(UiEvent.ShowMessage("Порядок обновлён"))
+            load(competitionId)
+        }
+    }
+
+    fun reorderCheckpoints() {
+        viewModelScope.launch {
+            _checkpoints.value.forEachIndexed { index, cp ->
+                val entity = repository.getCheckpointById(cp.id) ?: return@forEachIndexed
+                val newSortOrder = index + 1
+                if (entity.sortOrder != newSortOrder) {
+                    repository.updateCheckpoint(entity.copy(sortOrder = newSortOrder, displayNumber = newSortOrder))
+                }
+            }
+            _event.emit(UiEvent.ShowMessage("Порядок сохранён"))
+            load(competitionId)
+        }
+    }
+
+    fun showAddDialog() { _showAddDialog.value = true }
+    fun hideAddDialog() { _showAddDialog.value = false }
+}
+
+data class CheckpointItem(
+    val id: Long,
+    val displayNumber: Int,
+    val weight: Int,
+    val type: String,
+    val sortOrder: Int,
+    val normativeSeconds: Int? = null,
+    val bonusPoints: Int? = null,
+    val trackWaitTime: Boolean = false,
+    val trackExecutionTime: Boolean = false,
+    val forClass2: Boolean = true,
+    val forClass3: Boolean = true
+)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/competitions/CompetitionListScreen.kt>>>
+package com.speleo.start.presentation.screen.competitions
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun CompetitionListScreen(
+    onBack: () -> Unit,
+    onCreateNew: () -> Unit,
+    onSettings: (Long) -> Unit,
+    vm: CompetitionListVM = hiltViewModel()
+) {
+    val competitions by vm.activeCompetitions.collectAsStateWithLifecycle()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Соревнования") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+        ) {
+            Button(onClick = onCreateNew, modifier = Modifier.fillMaxWidth()) {
+                Text("➕ Новое соревнование")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (competitions.isEmpty()) {
+                Text("Нет активных соревнований", fontSize = 16.sp)
+            } else {
+                LazyColumn {
+                    items(competitions, key = { it.id }) { competition ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = {
+                                            vm.selectCompetition(competition.id)
+                                            onBack()
+                                        },
+                                        onLongClick = { }
+                                    )
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(competition.name, style = MaterialTheme.typography.titleSmall)
+                                    Text("${competition.date} · ${competition.place}", fontSize = 14.sp)
+                                    Text(
+                                        if (competition.isArchived) "📦 Архив" else "🟢 Активно",
+                                        fontSize = 12.sp,
+                                        color = if (competition.isArchived) Color.Gray else Color(0xFF00A86B)
+                                    )
+                                }
+                                IconButton(onClick = { onSettings(competition.id) }) {
+                                    Text("⚙️", fontSize = 20.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/competitions/CompetitionListVM.kt>>>
+package com.speleo.start.presentation.screen.competitions
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.CompetitionRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import javax.inject.Inject
+
+@HiltViewModel
+class CompetitionListVM @Inject constructor(
+    private val competitionRepository: CompetitionRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    val activeCompetitions = competitionRepository
+        .getActiveCompetitions()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun selectCompetition(id: Long) {
+        prefs.activeCompetitionId = id
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/competitions/CompetitionNewScreen.kt>>>
+package com.speleo.start.presentation.screen.competitions
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CompetitionNewScreen(
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+    vm: CompetitionNewVM = hiltViewModel()
+) {
+    var name by remember { mutableStateOf("") }
+    var shortName by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf("") }
+    var place by remember { mutableStateOf("") }
+    var discipline by remember { mutableStateOf("underground") }
+    var system by remember { mutableStateOf("") }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Новое соревнование") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedTextField(
+                value = name, onValueChange = { name = it },
+                label = { Text("Название") }, modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+            )
+            OutlinedTextField(
+                value = shortName, onValueChange = { shortName = it },
+                label = { Text("Краткое название") }, modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+            )
+            OutlinedTextField(
+                value = date, onValueChange = { date = it },
+                label = { Text("Дата (ДД.ММ.ГГГГ)") }, modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+            )
+            OutlinedTextField(
+                value = place, onValueChange = { place = it },
+                label = { Text("Место") }, modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+            )
+            Text("Дисциплина", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("underground" to "Подземное", "forest" to "Лесное", "urban" to "Городское").forEach { (v, l) ->
+                    FilterChip(selected = discipline == v, onClick = { discipline = v }, label = { Text(l) })
+                }
+            }
+            if (discipline == "underground") {
+                OutlinedTextField(
+                    value = system, onValueChange = { system = it },
+                    label = { Text("Система") }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    vm.saveCompetition(name, shortName, date, place, discipline, system.ifBlank { null }) { onSaved() }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = name.isNotBlank() && date.isNotBlank() && place.isNotBlank()
+            ) { Text("СОЗДАТЬ") }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/competitions/CompetitionNewVM.kt>>>
+package com.speleo.start.presentation.screen.competitions
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.CompetitionRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class CompetitionNewVM @Inject constructor(
+    private val repository: CompetitionRepository
+) : ViewModel() {
+
+    fun saveCompetition(
+        name: String, shortName: String, date: String, place: String,
+        discipline: String, system: String?, onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            repository.createCompetition(name, shortName, date, place, discipline, system)
+            onSuccess()
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/competitions/CompetitionSettingsScreen.kt>>>
+package com.speleo.start.presentation.screen.competitions
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CompetitionSettingsScreen(
+    competitionId: Long,
+    onBack: () -> Unit,
+    onCheckpoints: (Long) -> Unit,
+    vm: CompetitionSettingsVM = hiltViewModel()
+) {
+    val startInterval by vm.startInterval.collectAsStateWithLifecycle()
+    val controlTime2 by vm.controlTime2.collectAsStateWithLifecycle()
+    val controlTime3 by vm.controlTime3.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadSettings() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки соревнования") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("Интервал (сек)", fontSize = 14.sp)
+            OutlinedTextField(
+                value = startInterval,
+                onValueChange = { vm.updateInterval(it) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            Text("КВ 2-й класс (мин)", fontSize = 14.sp)
+            OutlinedTextField(
+                value = controlTime2,
+                onValueChange = { vm.updateControlTime2(it) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            Text("КВ 3-й класс (мин)", fontSize = 14.sp)
+            OutlinedTextField(
+                value = controlTime3,
+                onValueChange = { vm.updateControlTime3(it) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = { vm.saveSettings() }, modifier = Modifier.fillMaxWidth()) {
+                Text("СОХРАНИТЬ")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { onCheckpoints(competitionId) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("🗺️ Настроить КП")
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/competitions/CompetitionSettingsVM.kt>>>
+package com.speleo.start.presentation.screen.competitions
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.CompetitionRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class CompetitionSettingsVM @Inject constructor(
+    private val competitionRepo: CompetitionRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _startInterval = MutableStateFlow("120")
+    val startInterval: StateFlow<String> = _startInterval.asStateFlow()
+
+    private val _controlTime2 = MutableStateFlow("90")
+    val controlTime2: StateFlow<String> = _controlTime2.asStateFlow()
+
+    private val _controlTime3 = MutableStateFlow("60")
+    val controlTime3: StateFlow<String> = _controlTime3.asStateFlow()
+
+    fun loadSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+        }
+    }
+
+    fun updateInterval(value: String) { _startInterval.value = value }
+    fun updateControlTime2(value: String) { _controlTime2.value = value }
+    fun updateControlTime3(value: String) { _controlTime3.value = value }
+
+    fun saveSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val json = """
+                {
+                    "start_interval": ${_startInterval.value},
+                    "control_time_2": ${_controlTime2.value},
+                    "control_time_3": ${_controlTime3.value}
+                }
+            """.trimIndent()
+            competitionRepo.updateCompetition(comp.copy(settingsJson = json))
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/finish/FinishScreen.kt>>>
+package com.speleo.start.presentation.screen.finish
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FinishScreen(
+    onBack: () -> Unit,
+    vm: FinishVM = hiltViewModel()
+) {
+    val teams by vm.startedTeams.collectAsStateWithLifecycle()
+    val selectedIds by vm.selectedIds.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadStartedTeams() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Финиш") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+        ) {
+            Text("Выберите команды:", fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (teams.isEmpty()) {
+                Text("Нет команд на дистанции", fontSize = 16.sp)
+            } else {
+                LazyColumn {
+                    items(teams, key = { it.id }) { team ->
+                        val isSelected = selectedIds.contains(team.id)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clickable { vm.toggleSelection(team.id) }
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp)) {
+                                Checkbox(checked = isSelected, onCheckedChange = null)
+                                Text("№${team.number} (${team.className}-й кл)", fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = { vm.confirmFinish() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = selectedIds.isNotEmpty()
+            ) {
+                Text("ПОДТВЕРДИТЬ ФИНИШ (${selectedIds.size})")
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/finish/FinishVM.kt>>>
+package com.speleo.start.presentation.screen.finish
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.TeamRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class FinishTeamInfo(
+    val id: Long,
+    val number: Int,
+    val className: String
+)
+
+@HiltViewModel
+class FinishVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _startedTeams = MutableStateFlow<List<FinishTeamInfo>>(emptyList())
+    val startedTeams: StateFlow<List<FinishTeamInfo>> = _startedTeams.asStateFlow()
+
+    private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
+
+    fun loadStartedTeams() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            teamRepo.getStartedTeams(cid)
+                .map { list -> list.map { FinishTeamInfo(it.id, it.teamNumber, it.className) } }
+                .collect { _startedTeams.value = it }
+        }
+    }
+
+    fun toggleSelection(teamId: Long) {
+        _selectedIds.value = _selectedIds.value.let {
+            if (teamId in it) it - teamId else it + teamId
+        }
+    }
+
+    fun confirmFinish() {
+        viewModelScope.launch {
+            val timestamp = System.currentTimeMillis()
+            _selectedIds.value.forEach { id ->
+                teamRepo.setFinishTimestamp(id, timestamp)
+            }
+            _selectedIds.value = emptySet()
+            loadStartedTeams()
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/home/HomeScreen.kt>>>
+package com.speleo.start.presentation.screen.home
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.presentation.Screen
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun HomeScreen(onNavigate: (Screen) -> Unit) {
+    val configuration = LocalConfiguration.current
+    val columns = if (configuration.screenWidthDp >= 600) 3 else 2
+    var showDevMenu by remember { mutableStateOf(false) }
+    val homeVM: HomeVM = hiltViewModel()
+    val competitionName by homeVM.competitionName.collectAsStateWithLifecycle()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(title = { Text(competitionName.ifBlank { "🏆 СпелеоСтарт" }, fontSize = 18.sp) })
+        }
+    ) { paddingValues ->
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(
+                start = 8.dp, end = 8.dp,
+                top = paddingValues.calculateTopPadding() + 4.dp,
+                bottom = 8.dp
+            ),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(competitionName.ifBlank { "Нет активного соревнования" }, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("🟢 Активно", color = Color(0xFF00A86B), fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("01:24:36.12", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 36.sp, color = Color(0xFF00C853))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("6", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Text("🏃 На трассе", fontSize = 10.sp)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("12", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Text("🏁 Финиш", fontSize = 10.sp)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("1", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Text("⚠️ DQ", fontSize = 10.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { onNavigate(Screen.Start) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 6.dp)) {
+                                Text("⏱️ Старт", fontSize = 12.sp)
+                            }
+                            OutlinedButton(onClick = { onNavigate(Screen.Finish) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 6.dp)) {
+                                Text("🏁 Финиш", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            items(MenuTiles) { tile ->
+                MenuTileCard(
+                    tile = tile,
+                    onNavigate = onNavigate,
+                    onLongClick = if (tile.route == Screen.Settings) {{ showDevMenu = true }} else null
+                )
+            }
+
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedButton(onClick = { }, modifier = Modifier.weight(1f)) {
+                        Text("📤 Экспорт", fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { }, modifier = Modifier.weight(1f)) {
+                        Text("📥 Импорт", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDevMenu) {
+        AlertDialog(
+            onDismissRequest = { showDevMenu = false },
+            title = { Text("🛠 Меню разработчика") },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        homeVM.generateTestData()
+                        showDevMenu = false
+                    }) { Text("🧪 Заполнить тестовыми") }
+                    TextButton(onClick = {
+                        homeVM.clearTestData()
+                        showDevMenu = false
+                    }) { Text("🗑️ Очистить тестовые") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDevMenu = false }) { Text("Закрыть") }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun MenuTileCard(
+    tile: MenuTile,
+    onNavigate: (Screen) -> Unit,
+    onLongClick: (() -> Unit)? = null
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(90.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 10.dp, horizontal = 6.dp)
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = { tile.route?.let { onNavigate(it) } },
+                    onLongClick = { onLongClick?.invoke() }
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(text = tile.icon, fontSize = 28.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = tile.title, fontSize = 12.sp, textAlign = TextAlign.Center)
+            if (tile.subtitle != null) {
+                Text(text = tile.subtitle!!, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+data class MenuTile(
+    val icon: String,
+    val title: String,
+    val subtitle: String? = null,
+    val route: Screen? = null
+)
+
+val MenuTiles = listOf(
+    MenuTile("📋", "Соревнования", "Бяки 2026", Screen.Competitions),
+    MenuTile("📄", "Путевые", "Ожидают: 4", Screen.RouteCardDetail),
+    MenuTile("⏱️", "Старт", "Очередь: 6", Screen.Start),
+    MenuTile("🏁", "Финиш", "На дист.: 6", Screen.Finish),
+    MenuTile("📝", "Регистрация", "Зарег.: 18", Screen.Register),
+    MenuTile("📋", "Команды", "2кл:6 · 3кл:4", Screen.TeamList),
+    MenuTile("👤", "Персоны", "В базе: 20", Screen.Persons),
+    MenuTile("🏆", "Итоги", "Завершено: 5", Screen.Results),
+    MenuTile("⚙️", "Настройки", null, Screen.Settings),
+)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/home/HomeViewModel.kt>>>
+package com.speleo.start.presentation.screen.home
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.CompetitionRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import javax.inject.Inject
+
+@HiltViewModel
+class HomeViewModel @Inject constructor(
+    private val competitionRepository: CompetitionRepository
+) : ViewModel() {
+
+    val activeCompetitions = competitionRepository
+        .getActiveCompetitions()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/home/HomeVM.kt>>>
+package com.speleo.start.presentation.screen.home
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.TestDataGenerator
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.CompetitionRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class HomeVM @Inject constructor(
+    private val generator: TestDataGenerator,
+    private val prefs: PreferencesManager,
+    private val competitionRepo: CompetitionRepository
+) : ViewModel() {
+
+    private val _competitionName = MutableStateFlow("")
+    val competitionName: StateFlow<String> = _competitionName.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid != -1L) {
+                val comp = competitionRepo.getCompetitionById(cid)
+                _competitionName.value = comp?.shortName ?: ""
+            }
+        }
+    }
+
+    fun generateTestData() {
+        viewModelScope.launch { generator.generate() }
+    }
+
+    fun clearTestData() {
+        viewModelScope.launch { generator.clearAll() }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonDetailScreen.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.util.AgeCalculator
+import com.speleo.start.util.DateValidator
+import com.speleo.start.util.PhoneFormatter
+import com.speleo.start.presentation.component.TitleCaseTextField
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PersonDetailScreen(
+    personId: Long,
+    onBack: () -> Unit,
+    vm: PersonDetailVM = hiltViewModel()
+) {
+    val person by vm.person.collectAsStateWithLifecycle()
+    val isLoading by vm.isLoading.collectAsStateWithLifecycle()
+
+    // Режим редактирования
+    var isEditing by remember { mutableStateOf(false) }
+
+    // Поля для редактирования
+    var lastName by remember { mutableStateOf("") }
+    var firstName by remember { mutableStateOf("") }
+    var middleName by remember { mutableStateOf("") }
+    var nickname by remember { mutableStateOf("") }
+    var birthDate by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf("") }
+
+    LaunchedEffect(personId) {
+        vm.loadPerson(personId)
+    }
+
+    // Синхронизация полей при загрузке персоны
+    LaunchedEffect(person) {
+        person?.let { p ->
+            lastName = p.lastName
+            firstName = p.firstName
+            middleName = p.middleName ?: ""
+            nickname = p.nickname ?: ""
+            birthDate = p.birthDate ?: ""
+            phone = p.phone ?: ""
+            email = p.email ?: ""
+            gender = p.gender
+            note = p.note ?: ""
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        if (isEditing) "Редактирование" else {
+                            person?.let { "${it.lastName} ${it.firstName}" } ?: "Карточка персоны"
+                        },
+                        maxLines = 1
+                    )
+                },
+                navigationIcon = {
+                    TextButton(onClick = {
+                        if (isEditing) isEditing = false else onBack()
+                    }) {
+                        Text(if (isEditing) "❌" else "← Назад")
+                    }
+                },
+                actions = {
+                    if (!isEditing) {
+                        IconButton(onClick = { isEditing = true }) {
+                            Text("✏️", fontSize = 20.sp)
+                        }
+                    } else {
+                        IconButton(
+                            onClick = {
+                                vm.savePerson(
+                                    lastName = lastName,
+                                    firstName = firstName,
+                                    middleName = middleName.ifBlank { null },
+                                    nickname = nickname.ifBlank { null },
+                                    birthDate = birthDate.ifBlank { null },
+                                    phone = phone.ifBlank { null },
+                                    email = email.ifBlank { null },
+                                    gender = gender,
+                                    note = note.ifBlank { null }
+                                ) {
+                                    isEditing = false
+                                }
+                            }
+                        ) {
+                            Text("💾", fontSize = 20.sp)
+                        }
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (isLoading || person == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            val p = person!!
+            val age = AgeCalculator.calculateAge(if (isEditing) birthDate else p.birthDate)
+            val ageMark = AgeCalculator.getAgeColorMark(if (isEditing) birthDate else p.birthDate)
+            val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+            val initial = (if (isEditing) lastName else p.lastName).take(1).uppercase()
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Аватар
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = initial,
+                        fontSize = 40.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Кнопки фото (только в режиме просмотра)
+                if (!isEditing) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { /* TODO: тост */ }) {
+                            Text("📷", fontSize = 14.sp)
+                        }
+                        OutlinedButton(onClick = { /* TODO: загрузка */ }) {
+                            Text("🖼️", fontSize = 14.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+
+                // === РЕЖИМ ПРОСМОТРА ===
+                if (!isEditing) {
+                    PersonFieldRO(label = "ФАМИЛИЯ", value = p.lastName)
+                    PersonFieldRO(label = "ИМЯ", value = p.firstName)
+                    PersonFieldRO(label = "ОТЧЕСТВО", value = p.middleName ?: "—")
+                    PersonFieldRO(label = "ПОЗЫВНОЙ", value = p.nickname?.let { "«$it»" } ?: "—")
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        PersonFieldRO(
+                            label = "ДАТА РОЖДЕНИЯ",
+                            value = p.birthDate ?: "—",
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (age != null) {
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = ageColor.copy(alpha = 0.1f)
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("ВОЗРАСТ", fontSize = 12.sp, color = Color.Gray)
+                                    Text(
+                                        "$age лет",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = ageColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    PersonFieldRO(label = "ТЕЛЕФОН", value = p.phone ?: "—")
+                    PersonFieldRO(label = "EMAIL", value = p.email ?: "—")
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("ПОЛ", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.width(80.dp))
+                        when (p.gender) {
+                            "male" -> Text("Мужской", fontSize = 16.sp)
+                            "female" -> Text("Женский", fontSize = 16.sp)
+                            else -> Text("—", fontSize = 16.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider()
+
+                    // История участия
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "🏆 ИСТОРИЯ УЧАСТИЯ",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Нет данных", color = Color.Gray)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider()
+
+                    // Заметки
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "📝 ЗАМЕТКИ",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(p.note ?: "—", fontSize = 16.sp)
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    // Кнопки действий
+                    Button(
+                        onClick = { /* TODO: Поделиться (Итерация 6) */ },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("📤 ПОДЕЛИТЬСЯ КАРТОЧКОЙ")
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = { /* TODO: Чёрный список (Итерация 6) */ },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("🚫 ДОБАВИТЬ В ЧЁРНЫЙ СПИСОК")
+                    }
+
+                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
+                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
+                } else {
+                    TitleCaseTextField(
+                        value = lastName,
+                        onValueChange = { lastName = it },
+                        label = "Фамилия",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    TitleCaseTextField(
+                        value = firstName,
+                        onValueChange = { firstName = it },
+                        label = "Имя",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    TitleCaseTextField(
+                        value = middleName,
+                        onValueChange = { middleName = it },
+                        label = "Отчество",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    TitleCaseTextField(
+                        value = nickname,
+                        onValueChange = { nickname = it },
+                        label = "Позывной",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Дата рождения с маской
+                    DateOfBirthFieldEdit(
+                        value = birthDate,
+                        onValueChange = { birthDate = it },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (age != null) {
+                        Text(
+                            "Возраст: $age лет",
+                            color = ageColor,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { phone = PhoneFormatter.formatAsYouType(it.filter { c -> c.isDigit() }) },
+                        label = { Text("Телефон") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next)
+                    )
+
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Email") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next)
+                    )
+
+                    // Пол
+                    Text("Пол", fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("male" to "Мужской", "female" to "Женский").forEach { (v, l) ->
+                            FilterChip(
+                                selected = gender == v,
+                                onClick = { gender = v },
+                                label = { Text(l) }
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text("Заметки") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+// Поле просмотра (read-only)
+@Composable
+private fun PersonFieldRO(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.padding(vertical = 8.dp)) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = Color.Gray
+        )
+        Text(
+            text = value,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+// Поле даты рождения с маской (для редактирования)
+// === Исправленная функция ===
+@Composable
+private fun DateOfBirthFieldEdit(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // НЕ используем value как ключ!
+    var state by remember {
+        mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
+    }
+
+    // Синхронизация только извне
+    LaunchedEffect(value) {
+        if (state.text != value) {
+            state = TextFieldValue(value, TextRange(value.length))
+        }
+    }
+
+    OutlinedTextField(
+        value = state,
+        onValueChange = { newValue ->
+            // Форматируем: оставляем только цифры, максимум 8
+            val digits = newValue.text.filter { it.isDigit() }.take(8)
+            val formatted = buildString {
+                for (i in digits.indices) {
+                    if (i == 2 || i == 4) append(".")
+                    append(digits[i])
+                }
+            }
+
+            // Расчёт курсора
+            val oldCursor = newValue.selection.start
+            val digitsBefore = newValue.text.take(oldCursor).count { it.isDigit() }
+            val dotsBefore = ((digitsBefore - 1) / 2).coerceIn(0, 2)
+            val newCursor = (digitsBefore + dotsBefore).coerceIn(0, formatted.length)
+
+            state = TextFieldValue(
+                text = formatted,
+                selection = TextRange(newCursor),
+                composition = newValue.composition  // ← СОХРАНЯЕМ composition!
+            )
+
+            if (formatted != value) {
+                onValueChange(formatted)
+            }
+        },
+        label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonDetailVM.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.repository.PersonRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class PersonDetailVM @Inject constructor(
+    private val personRepo: PersonRepository
+) : ViewModel() {
+
+    private val _person = MutableStateFlow<PersonEntity?>(null)
+    val person: StateFlow<PersonEntity?> = _person.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    fun loadPerson(personId: Long) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _person.value = personRepo.getPersonById(personId)
+            _isLoading.value = false
+        }
+    }
+
+    fun savePerson(
+        lastName: String,
+        firstName: String,
+        middleName: String?,
+        nickname: String?,
+        birthDate: String?,
+        phone: String?,
+        email: String?,
+        gender: String?,
+        note: String?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            val current = _person.value ?: return@launch
+            val updated = current.copy(
+                lastName = lastName,
+                firstName = firstName,
+                middleName = middleName,
+                nickname = nickname,
+                birthDate = birthDate,
+                phone = phone,
+                email = email,
+                gender = gender,
+                note = note,
+                updatedAt = System.currentTimeMillis()
+            )
+            personRepo.updatePerson(updated)
+            _person.value = updated
+            onSuccess()
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonListScreen.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.presentation.component.PersonBadge
+import com.speleo.start.util.AgeCalculator
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PersonListScreen(
+    onBack: () -> Unit,
+    onAddNew: () -> Unit,
+    onPersonClick: (Long) -> Unit,
+    vm: PersonListVM = hiltViewModel()
+) {
+    val persons by vm.persons.collectAsStateWithLifecycle()
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+
+    var selectedPerson by remember { mutableStateOf<PersonEntity?>(null) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Персоны") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { vm.onSearchQueryChange(it) },
+                label = { Text("🔍 Поиск по фамилии") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(onClick = onAddNew, modifier = Modifier.fillMaxWidth()) {
+                Text("➕ Новая персона")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (persons.isEmpty()) {
+                Text("Нет персон в базе", fontSize = 16.sp)
+            } else {
+                LazyColumn {
+                    items(persons) { person ->
+                        val age = AgeCalculator.calculateAge(person.birthDate)
+                        val ageMark = AgeCalculator.getAgeColorMark(person.birthDate)
+                        val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { selectedPerson = person }
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    "${person.lastName} ${person.firstName}",
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                if (person.birthDate != null) {
+                                    Text(
+                                        text = if (age != null) "$age лет" else person.birthDate,
+                                        fontSize = 14.sp,
+                                        color = ageColor
+                                    )
+                                }
+                                if (person.phone != null) Text("📞 ${person.phone}", fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Визитка — ЗА пределами Scaffold, но внутри @Composable
+    if (selectedPerson != null) {
+        AlertDialog(
+            onDismissRequest = { selectedPerson = null },
+            title = { Text("Визитка") },
+            text = {
+                PersonBadge(
+                    person = selectedPerson!!,
+                    onOpenCard = {
+                        val personId = selectedPerson!!.id
+                        selectedPerson = null
+                        onPersonClick(personId)
+                    }
+                )
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedPerson = null }) {
+                    Text("Закрыть")
+                }
+            }
+        )
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonListVM.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.PersonRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import javax.inject.Inject
+
+@HiltViewModel
+class PersonListVM @Inject constructor(
+    private val repository: PersonRepository
+) : ViewModel() {
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val persons = _searchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.length >= 2) {
+                repository.searchPersons(query)
+            } else {
+                repository.getAllPersons()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonNewScreen.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.speleo.start.util.DateValidator
+import com.speleo.start.util.PhoneFormatter
+import java.util.Calendar
+import com.speleo.start.presentation.component.TitleCaseTextField
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PersonNewScreen(
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+    vm: PersonNewVM = hiltViewModel()
+) {
+    var lastName by remember { mutableStateOf("") }
+    var firstName by remember { mutableStateOf("") }
+    var middleName by remember { mutableStateOf("") }
+    var nickname by remember { mutableStateOf("") }
+    var showExtraFields by remember { mutableStateOf(false) }
+    var birthDate by remember { mutableStateOf("") }
+    var noBirthDate by remember { mutableStateOf(false) }
+    var phone by remember { mutableStateOf("") }
+    var phoneState by remember { mutableStateOf(TextFieldValue("")) }
+    var email by remember { mutableStateOf("") }
+    var showEmail by remember { mutableStateOf(false) }
+    var gender by remember { mutableStateOf("male") }
+
+    val age = remember(birthDate) {
+        if (!noBirthDate && birthDate.length == 10 && DateValidator.isValid(birthDate)) {
+            try {
+                val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                val birth = sdf.parse(birthDate)
+                val today = Calendar.getInstance()
+                val birthCal = Calendar.getInstance().apply { time = birth!! }
+                var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
+                if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) age--
+                age
+            } catch (e: Exception) { null }
+        } else null
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Новая персона") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Фамилия
+            TitleCaseTextField(
+                value = lastName,
+                onValueChange = { lastName = it },
+                label = "Фамилия",
+                modifier = Modifier.fillMaxWidth()
+            )
+            // Имя
+            TitleCaseTextField(
+                value = firstName,
+                onValueChange = { firstName = it },
+                label = "Имя",
+                modifier = Modifier.fillMaxWidth()
+            )
+            // Отчество (скрытое, но тоже TitleCase)
+            // Скрытые поля: Отчество + Позывной
+            var showExtraFields by remember { mutableStateOf(false) }
+
+            TextButton(onClick = { showExtraFields = !showExtraFields }) {
+                Text(if (showExtraFields) "▾ Дополнительно" else "▸ Дополнительно")
+            }
+            AnimatedVisibility(visible = showExtraFields) {
+                Column {
+                    TitleCaseTextField(
+                        value = middleName,
+                        onValueChange = { middleName = it },
+                        label = "Отчество",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TitleCaseTextField(
+                        value = nickname,
+                        onValueChange = { nickname = it },
+                        label = "Позывной",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            // Дата рождения
+            if (!noBirthDate) {
+                DateOfBirthField(
+                    value = birthDate,
+                    onValueChange = { birthDate = it },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                age?.let {
+                    val color = when {
+                        it < 14 -> Color(0xFFD32F2F)
+                        it in 14..17 -> Color(0xFFFF8C00)
+                        it > 70 -> Color(0xFFFF8C00)
+                        else -> Color(0xFF00A86B)
+                    }
+                    Text("Возраст: $it лет", color = color, fontSize = 14.sp)
+                    if (it >= 18) {
+                        Text("👨‍🏫 Может быть ментором", color = Color(0xFF1E5A7A), fontSize = 13.sp)
+                    }
+                }
+            }
+            // Чекбокс «Без даты рождения»
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = noBirthDate, onCheckedChange = { noBirthDate = it })
+                Text("Без даты рождения", fontSize = 14.sp)
+            }
+            // Телефон
+            OutlinedTextField(
+                value = phoneState,
+                onValueChange = { newVal ->
+                    val digits = newVal.text.filter { it.isDigit() }
+                    val formatted = PhoneFormatter.formatAsYouType(digits)
+                    phoneState = TextFieldValue(formatted, TextRange(formatted.length))
+                    phone = formatted
+                },
+                label = { Text("Телефон") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            )
+            // Email (скрытый)
+            TextButton(onClick = { showEmail = !showEmail }) {
+                Text(if (showEmail) "▾ Email" else "▸ Email")
+            }
+            AnimatedVisibility(visible = showEmail) {
+                OutlinedTextField(
+                    value = email, onValueChange = { email = it },
+                    label = { Text("Email") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+            }
+            // Пол
+            Text("Пол", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("male" to "Мужской", "female" to "Женский").forEach { (v, l) ->
+                    FilterChip(selected = gender == v, onClick = { gender = v }, label = { Text(l) })
+                }
+            }
+            // Кнопка сохранения
+            Button(
+                onClick = {
+                    vm.savePerson(
+                        lastName = lastName,
+                        firstName = firstName,
+                        middleName = middleName.ifBlank { null },
+                        nickname = nickname.ifBlank { null },  // ← НОВОЕ
+                        birthDate = if (noBirthDate) null else birthDate.ifBlank { null },
+                        phone = phone.ifBlank { null },
+                        gender = gender
+                    ) { onSaved() }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = lastName.isNotBlank() && firstName.isNotBlank()
+            ) {
+                Text("СОХРАНИТЬ")
+            }
+        }
+    }
+}
+
+@Composable
+fun DateOfBirthField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    // НЕ используем remember(value) — храним состояние отдельно
+    var state by remember {
+        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
+    }
+
+    // Синхронизация только извне
+    LaunchedEffect(value) {
+        if (state.text != value) {
+            state = TextFieldValue(value, TextRange(value.length))
+        }
+    }
+
+    OutlinedTextField(
+        value = state,
+        onValueChange = { newVal ->
+            val formatted = DateValidator.formatAsYouType(newVal.text)
+
+            // Если форматирование не изменило текст — просто обновляем
+            if (formatted == newVal.text) {
+                state = newVal
+                if (formatted != value) onValueChange(formatted)
+                return@OutlinedTextField
+            }
+
+            // Пересчитываем позицию курсора
+            val oldCursor = newVal.selection.start
+            val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
+            val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
+            val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
+
+            state = newVal.copy(
+                text = formatted,
+                selection = TextRange(newCursor)
+            )
+            if (formatted != value) onValueChange(formatted)
+        },
+        label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonNewVM.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.PersonRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class PersonNewVM @Inject constructor(
+    private val repository: PersonRepository
+) : ViewModel() {
+
+    fun savePerson(
+        lastName: String,
+        firstName: String,
+        middleName: String?,
+        nickname: String?,
+        birthDate: String?,
+        phone: String?,
+        gender: String?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            repository.createPerson(
+                lastName = lastName,
+                firstName = firstName,
+                middleName = middleName,
+                nickname = nickname,
+                birthDate = birthDate,
+                phone = phone,
+                gender = gender
+            )
+            onSuccess()
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/results/ResultsScreen.kt>>>
+package com.speleo.start.presentation.screen.results
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ResultsScreen(
+    onBack: () -> Unit,
+    vm: ResultsVM = hiltViewModel()
+) {
+    val results2 by vm.results2.collectAsStateWithLifecycle()
+    val results3 by vm.results3.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadResults() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Итоги") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp)
+        ) {
+            Text("2-й класс", fontSize = 18.sp)
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                items(results2) { team ->
+                    Card(modifier = Modifier.fillMaxWidth().padding(2.dp)) {
+                        Row(modifier = Modifier.padding(8.dp)) {
+                            Text("№${team.number}", modifier = Modifier.weight(1f))
+                            Text("${team.score} баллов", modifier = Modifier.weight(1f))
+                            Text(team.time, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text("3-й класс", fontSize = 18.sp)
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                items(results3) { team ->
+                    Card(modifier = Modifier.fillMaxWidth().padding(2.dp)) {
+                        Row(modifier = Modifier.padding(8.dp)) {
+                            Text("№${team.number}", modifier = Modifier.weight(1f))
+                            Text("${team.score} баллов", modifier = Modifier.weight(1f))
+                            Text(team.time, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/results/ResultsVM.kt>>>
+package com.speleo.start.presentation.screen.results
+
+import androidx.lifecycle.ViewModel
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.TeamRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import javax.inject.Inject
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
+
+
+data class TeamResult(
+    val number: Int,
+    val className: String,
+    val members: String = "",
+    val score: Int = 0,
+    val time: String = "",
+    val status: String = ""
+)
+
+@HiltViewModel
+class ResultsVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _results2 = MutableStateFlow<List<TeamResult>>(emptyList())
+    val results2: StateFlow<List<TeamResult>> = _results2.asStateFlow()
+
+    private val _results3 = MutableStateFlow<List<TeamResult>>(emptyList())
+    val results3: StateFlow<List<TeamResult>> = _results3.asStateFlow()
+
+    fun loadResults() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            teamRepo.getFinishedTeams(cid)
+                .map { teams ->
+                    teams.map { t ->
+                        TeamResult(
+                            number = t.teamNumber,
+                            className = t.className,
+                            status = t.status,
+                            time = t.finishTimestamp?.let { "${(it - (t.startTimestamp ?: 0)) / 60000} мин" } ?: "-"
+                        )
+                    }.sortedByDescending { it.score }
+                }
+                .collect { all ->
+                    _results2.value = all.filter { it.className == "2" }
+                    _results3.value = all.filter { it.className == "3" }
+                }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/routecard/RouteCardScreen.kt>>>
+package com.speleo.start.presentation.screen.routecard
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RouteCardScreen(
+    teamId: Long,
+    onBack: () -> Unit,
+    vm: RouteCardVM = hiltViewModel()
+) {
+    val entries by vm.entries.collectAsStateWithLifecycle()
+
+    LaunchedEffect(teamId) { vm.loadRouteCard(teamId) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Путевой лист") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            itemsIndexed(entries) { index, entry ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(8.dp)) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("КП №${entry.displayNumber} (вес ${entry.weight})", fontSize = 16.sp)
+                            Text(if (entry.type == "technical") "Тех" else "КП", fontSize = 14.sp)
+                        }
+                        Column {
+                            Checkbox(checked = entry.taken, onCheckedChange = { vm.toggleTaken(index) })
+                            Text("Взят", fontSize = 10.sp)
+                        }
+                        if (entry.taken) {
+                            Column {
+                                Checkbox(checked = entry.takenWithError, onCheckedChange = { vm.toggleError(index) })
+                                Text("Ошибка", fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { vm.save() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("СОХРАНИТЬ")
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+

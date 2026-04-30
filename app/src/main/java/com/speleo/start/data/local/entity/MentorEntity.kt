@@ -3,6 +3,7 @@ package com.speleo.start.data.local.entity
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
+import androidx.room.Index
 
 @Entity(
     tableName = "mentors",
@@ -13,7 +14,8 @@ import androidx.room.PrimaryKey
             childColumns = ["personId"],
             onDelete = ForeignKey.CASCADE
         )
-    ]
+    ],
+    indices = [Index(value = ["personId"])]
 )
 data class MentorEntity(
     @PrimaryKey(autoGenerate = true)

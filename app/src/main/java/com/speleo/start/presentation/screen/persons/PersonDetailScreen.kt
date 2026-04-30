@@ -11,20 +11,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.speleo.start.util.AgeCalculator
+import com.speleo.start.presentation.component.TitleCaseTextField
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.PhoneFormatter
-import com.speleo.start.presentation.component.TitleCaseTextField
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,41 +37,74 @@ fun PersonDetailScreen(
 ) {
     val person by vm.person.collectAsStateWithLifecycle()
     val isLoading by vm.isLoading.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // Режим редактирования
     var isEditing by remember { mutableStateOf(false) }
 
-    // Поля для редактирования
     var lastName by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var middleName by remember { mutableStateOf("") }
     var nickname by remember { mutableStateOf("") }
     var birthDate by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
     var gender by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf("") }
+
+    val scrollState = rememberScrollState()
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(personId) {
         vm.loadPerson(personId)
     }
 
-    // Синхронизация полей при загрузке персоны
-    LaunchedEffect(person) {
-        person?.let { p ->
-            lastName = p.lastName
-            firstName = p.firstName
-            middleName = p.middleName ?: ""
-            nickname = p.nickname ?: ""
-            birthDate = p.birthDate ?: ""
-            phone = p.phone ?: ""
-            email = p.email ?: ""
-            gender = p.gender
-            note = p.note ?: ""
+    LaunchedEffect(person, isEditing) {
+        if (!isEditing) {
+            person?.let { p ->
+                lastName = p.lastName
+                firstName = p.firstName
+                middleName = p.middleName ?: ""
+                nickname = p.nickname ?: ""
+                birthDate = p.birthDate ?: ""
+                phone = p.phone ?: ""
+                gender = p.gender
+                note = p.note ?: ""
+            }
         }
     }
 
+    LaunchedEffect(Unit) {
+        vm.error.collectLatest { errorMsg ->
+            snackbarHostState.showSnackbar(errorMsg)
+        }
+    }
+
+    // Проверка частичной даты
+    fun isPartialDateInvalid(date: String): Boolean {
+        if (date.isBlank()) return false
+        if (date.length < 10) {
+            val parts = date.split(".")
+            if (parts.isNotEmpty()) {
+                val dayPart = parts.getOrNull(0) ?: ""
+                if (dayPart.isNotBlank() && dayPart.toIntOrNull() !in 1..31) return true
+                val monthPart = parts.getOrNull(1) ?: ""
+                if (monthPart.isNotBlank() && monthPart.toIntOrNull() !in 1..12) return true
+            }
+            return false
+        }
+        return !DateValidator.isRealDate(date)
+    }
+
+    val isDateValid = birthDate.isBlank() ||
+            (birthDate.length == 10 && DateValidator.isRealDate(birthDate))
+
+    val isDateError = birthDate.isNotBlank() && isPartialDateInvalid(birthDate)
+
+    val isFormValid = lastName.isNotBlank() &&
+            firstName.isNotBlank() &&
+            isDateValid
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -82,7 +117,11 @@ fun PersonDetailScreen(
                 },
                 navigationIcon = {
                     TextButton(onClick = {
-                        if (isEditing) isEditing = false else onBack()
+                        if (isEditing) {
+                            isEditing = false
+                        } else {
+                            onBack()
+                        }
                     }) {
                         Text(if (isEditing) "❌" else "← Назад")
                     }
@@ -102,13 +141,13 @@ fun PersonDetailScreen(
                                     nickname = nickname.ifBlank { null },
                                     birthDate = birthDate.ifBlank { null },
                                     phone = phone.ifBlank { null },
-                                    email = email.ifBlank { null },
                                     gender = gender,
                                     note = note.ifBlank { null }
                                 ) {
                                     isEditing = false
                                 }
-                            }
+                            },
+                            enabled = isFormValid
                         ) {
                             Text("💾", fontSize = 20.sp)
                         }
@@ -126,22 +165,21 @@ fun PersonDetailScreen(
             }
         } else {
             val p = person!!
-            val age = AgeCalculator.calculateAge(if (isEditing) birthDate else p.birthDate)
-            val ageMark = AgeCalculator.getAgeColorMark(if (isEditing) birthDate else p.birthDate)
+            val age = DateValidator.calculateAge(birthDate)
+            val ageMark = DateValidator.getAgeColorMark(birthDate)
             val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
-            val initial = (if (isEditing) lastName else p.lastName).take(1).uppercase()
+            val initial = lastName.take(1).uppercase()
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Аватар
                 Box(
                     modifier = Modifier
                         .size(96.dp)
@@ -159,21 +197,20 @@ fun PersonDetailScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Кнопки фото (только в режиме просмотра)
                 if (!isEditing) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { /* TODO: тост */ }) {
+                        OutlinedButton(onClick = { }) {
                             Text("📷", fontSize = 14.sp)
                         }
-                        OutlinedButton(onClick = { /* TODO: загрузка */ }) {
+                        OutlinedButton(onClick = { }) {
                             Text("🖼️", fontSize = 14.sp)
                         }
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
 
-                // === РЕЖИМ ПРОСМОТРА ===
                 if (!isEditing) {
+                    // === РЕЖИМ ПРОСМОТРА ===
                     PersonFieldRO(label = "ФАМИЛИЯ", value = p.lastName)
                     PersonFieldRO(label = "ИМЯ", value = p.firstName)
                     PersonFieldRO(label = "ОТЧЕСТВО", value = p.middleName ?: "—")
@@ -188,7 +225,7 @@ fun PersonDetailScreen(
                             value = p.birthDate ?: "—",
                             modifier = Modifier.weight(1f)
                         )
-                        if (age != null) {
+                        if (age != null && age >= 0) {
                             Card(
                                 modifier = Modifier.weight(1f),
                                 colors = CardDefaults.cardColors(
@@ -209,7 +246,6 @@ fun PersonDetailScreen(
                     }
 
                     PersonFieldRO(label = "ТЕЛЕФОН", value = p.phone ?: "—")
-                    PersonFieldRO(label = "EMAIL", value = p.email ?: "—")
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -225,9 +261,8 @@ fun PersonDetailScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
                     HorizontalDivider()
-
-                    // История участия
                     Spacer(modifier = Modifier.height(16.dp))
+
                     Text(
                         "🏆 ИСТОРИЯ УЧАСТИЯ",
                         fontSize = 14.sp,
@@ -235,6 +270,7 @@ fun PersonDetailScreen(
                         color = Color.Gray
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -253,9 +289,8 @@ fun PersonDetailScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
                     HorizontalDivider()
-
-                    // Заметки
                     Spacer(modifier = Modifier.height(16.dp))
+
                     Text(
                         "📝 ЗАМЕТКИ",
                         fontSize = 14.sp,
@@ -267,9 +302,8 @@ fun PersonDetailScreen(
 
                     Spacer(modifier = Modifier.height(32.dp))
 
-                    // Кнопки действий
                     Button(
-                        onClick = { /* TODO: Поделиться (Итерация 6) */ },
+                        onClick = { },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("📤 ПОДЕЛИТЬСЯ КАРТОЧКОЙ")
@@ -278,90 +312,164 @@ fun PersonDetailScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     OutlinedButton(
-                        onClick = { /* TODO: Чёрный список (Итерация 6) */ },
+                        onClick = {
+                            vm.blacklistPerson {
+                                vm.loadPerson(personId)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.error
                         )
                     ) {
-                        Text("🚫 ДОБАВИТЬ В ЧЁРНЫЙ СПИСОК")
+                        Text(if (p.blacklisted) "✅ УБРАТЬ ИЗ ЧЁРНОГО СПИСКА" else "🚫 ДОБАВИТЬ В ЧЁРНЫЙ СПИСОК")
                     }
-
-                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
-                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
                 } else {
+                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
+
                     TitleCaseTextField(
                         value = lastName,
                         onValueChange = { lastName = it },
                         label = "Фамилия",
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
                     )
 
                     TitleCaseTextField(
                         value = firstName,
                         onValueChange = { firstName = it },
                         label = "Имя",
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
                     )
 
                     TitleCaseTextField(
                         value = middleName,
                         onValueChange = { middleName = it },
                         label = "Отчество",
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
                     )
 
                     TitleCaseTextField(
                         value = nickname,
                         onValueChange = { nickname = it },
                         label = "Позывной",
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
                     )
 
-                    // Дата рождения с маской
-                    DateOfBirthFieldEdit(
-                        value = birthDate,
-                        onValueChange = { birthDate = it },
-                        modifier = Modifier.fillMaxWidth()
+                    // Поле даты рождения
+                    var dateFieldState by remember { mutableStateOf(TextFieldValue(birthDate)) }
+
+                    LaunchedEffect(birthDate) {
+                        if (dateFieldState.text != birthDate && dateFieldState.composition == null) {
+                            dateFieldState = TextFieldValue(birthDate, TextRange(birthDate.length))
+                        }
+                    }
+
+                    val dateLabel = if (isDateError) {
+                        "Некорректная дата"
+                    } else {
+                        "Дата рождения"
+                    }
+
+                    OutlinedTextField(
+                        value = dateFieldState,
+                        onValueChange = { newState ->
+                            val digits = newState.text.filter { it.isDigit() }.take(8)
+                            val formatted = buildString {
+                                for (i in digits.indices) {
+                                    if (i == 2 || i == 4) append(".")
+                                    append(digits[i])
+                                }
+                            }
+
+                            val cursorPos = newState.selection.start
+                            val addedChar = newState.text.length > dateFieldState.text.length
+                            val newCursor = if (addedChar && formatted.length > dateFieldState.text.length) {
+                                cursorPos + 1
+                            } else {
+                                cursorPos.coerceIn(0, formatted.length)
+                            }
+
+                            dateFieldState = newState.copy(
+                                text = formatted,
+                                selection = TextRange(newCursor.coerceIn(0, formatted.length))
+                            )
+
+                            if (formatted != birthDate) {
+                                birthDate = formatted
+                            }
+
+                            if (formatted.length == 10 && DateValidator.isRealDate(formatted)) {
+                                focusManager.moveFocus(FocusDirection.Down)
+                            }
+                        },
+                        label = { Text(dateLabel) },
+                        isError = isDateError,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done
+                        )
                     )
 
-                    if (age != null) {
+                    if (isDateError) {
+                        Text(
+                            "Некорректная дата",
+                            color = Color(0xFFD32F2F),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                        )
+                    } else if (age != null && age >= 0) {
+                        val color = when {
+                            age < 14 -> Color(0xFFD32F2F)
+                            age in 14..17 -> Color(0xFFFF8C00)
+                            age > 70 -> Color(0xFFFF8C00)
+                            else -> Color(0xFF00A86B)
+                        }
                         Text(
                             "Возраст: $age лет",
-                            color = ageColor,
+                            color = color,
                             fontSize = 14.sp,
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
+                        if (age >= 18) {
+                            Text(
+                                "👨‍🏫 Может быть ментором",
+                                color = Color(0xFF1E5A7A),
+                                fontSize = 13.sp
+                            )
+                        }
                     }
 
                     OutlinedTextField(
                         value = phone,
-                        onValueChange = { phone = PhoneFormatter.formatAsYouType(it.filter { c -> c.isDigit() }) },
+                        onValueChange = {
+                            phone = PhoneFormatter.formatAsYouType(it.filter { char -> char.isDigit() })
+                        },
                         label = { Text("Телефон") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next)
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Phone,
+                            imeAction = ImeAction.Done
+                        )
                     )
 
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        label = { Text("Email") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next)
-                    )
-
-                    // Пол
                     Text("Пол", fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("male" to "Мужской", "female" to "Женский").forEach { (v, l) ->
-                            FilterChip(
-                                selected = gender == v,
-                                onClick = { gender = v },
-                                label = { Text(l) }
-                            )
-                        }
+                        FilterChip(
+                            selected = gender == "male",
+                            onClick = { gender = "male" },
+                            label = { Text("Мужской") }
+                        )
+                        FilterChip(
+                            selected = gender == "female",
+                            onClick = { gender = "female" },
+                            label = { Text("Женский") }
+                        )
                     }
 
                     OutlinedTextField(
@@ -380,7 +488,6 @@ fun PersonDetailScreen(
     }
 }
 
-// Поле просмотра (read-only)
 @Composable
 private fun PersonFieldRO(
     label: String,
@@ -399,59 +506,4 @@ private fun PersonFieldRO(
             fontWeight = FontWeight.Medium
         )
     }
-}
-
-// Поле даты рождения с маской (для редактирования)
-// === Исправленная функция ===
-@Composable
-private fun DateOfBirthFieldEdit(
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // НЕ используем value как ключ!
-    var state by remember {
-        mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
-    }
-
-    // Синхронизация только извне
-    LaunchedEffect(value) {
-        if (state.text != value) {
-            state = TextFieldValue(value, TextRange(value.length))
-        }
-    }
-
-    OutlinedTextField(
-        value = state,
-        onValueChange = { newValue ->
-            // Форматируем: оставляем только цифры, максимум 8
-            val digits = newValue.text.filter { it.isDigit() }.take(8)
-            val formatted = buildString {
-                for (i in digits.indices) {
-                    if (i == 2 || i == 4) append(".")
-                    append(digits[i])
-                }
-            }
-
-            // Расчёт курсора
-            val oldCursor = newValue.selection.start
-            val digitsBefore = newValue.text.take(oldCursor).count { it.isDigit() }
-            val dotsBefore = ((digitsBefore - 1) / 2).coerceIn(0, 2)
-            val newCursor = (digitsBefore + dotsBefore).coerceIn(0, formatted.length)
-
-            state = TextFieldValue(
-                text = formatted,
-                selection = TextRange(newCursor),
-                composition = newValue.composition  // ← СОХРАНЯЕМ composition!
-            )
-
-            if (formatted != value) {
-                onValueChange(formatted)
-            }
-        },
-        label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
-        modifier = modifier,
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-    )
 }

@@ -22,7 +22,7 @@ import com.speleo.start.data.local.entity.*
         TeamRouteCardEntity::class,
         AppSettingsEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

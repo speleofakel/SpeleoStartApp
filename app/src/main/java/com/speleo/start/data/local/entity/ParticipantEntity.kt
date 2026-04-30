@@ -3,6 +3,7 @@ package com.speleo.start.data.local.entity
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
+import androidx.room.Index
 
 @Entity(
     tableName = "participants",
@@ -19,7 +20,8 @@ import androidx.room.PrimaryKey
             childColumns = ["personId"],
             onDelete = ForeignKey.RESTRICT
         )
-    ]
+    ],
+    indices = [Index(value = ["teamId"]), Index(value = ["personId"])]
 )
 data class ParticipantEntity(
     @PrimaryKey(autoGenerate = true)
