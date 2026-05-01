@@ -7,8 +7,24 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.speleo.start.data.local.dao.*
-import com.speleo.start.data.local.entity.*
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.dao.CheckpointDao
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.dao.TeamRouteCardDao
+import com.speleo.start.data.local.entity.AppSettingsEntity
+import com.speleo.start.data.local.entity.CheckpointEntity
+import com.speleo.start.data.local.entity.CompetitionEntity
+import com.speleo.start.data.local.entity.MasterRouteCardEntity
+import com.speleo.start.data.local.entity.MentorEntity
+import com.speleo.start.data.local.entity.ParticipantEntity
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.local.entity.TeamEntity
+import com.speleo.start.data.local.entity.TeamRouteCardEntity
 
 @Database(
     entities = [

@@ -2,11 +2,16 @@ package com.speleo.start.presentation.screen.teamcard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.speleo.start.data.local.entity.*
-import com.speleo.start.data.repository.*
+import com.speleo.start.data.repository.MentorRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
 import com.speleo.start.util.AgeCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 

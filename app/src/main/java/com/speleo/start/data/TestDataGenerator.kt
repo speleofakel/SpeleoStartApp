@@ -3,10 +3,22 @@ package com.speleo.start.data
 import android.util.Log
 import androidx.room.withTransaction
 import com.speleo.start.data.local.AppDatabase
-import com.speleo.start.data.local.dao.*
-import com.speleo.start.data.local.entity.*
-import kotlinx.coroutines.*
-import java.util.*
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.entity.CompetitionEntity
+import com.speleo.start.data.local.entity.MasterRouteCardEntity
+import com.speleo.start.data.local.entity.MentorEntity
+import com.speleo.start.data.local.entity.ParticipantEntity
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.local.entity.TeamEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.Random
 import javax.inject.Inject
 import javax.inject.Singleton
 

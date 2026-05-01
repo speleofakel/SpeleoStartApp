@@ -5,7 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
 import com.speleo.start.data.repository.CompetitionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
 @HiltViewModel

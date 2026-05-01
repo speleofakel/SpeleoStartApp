@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>КП по классам — SpeleoStart</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #121212;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        /* Карточка настроек */
+        .settings-card {
+            max-width: 500px;
+            width: 100%;
+            background: #1e1e1e;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+
+        /* Заголовок карточки */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #333;
+        }
+
+        .card-header h2 {
+            color: #e0e0e0;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .card-header span {
+            color: #4CAF50;
+            font-size: 13px;
+            background: #2c2c2c;
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+
+        /* Блок с КП */
+        .checkpoints-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            color: #aaa;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        /* Строка класса */
+        .class-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            background: #252525;
+            border-radius: 12px;
+            padding: 6px 12px;
+            min-height: 48px;
+        }
+
+        .class-row:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Лейбл класса */
+        .class-label {
+            width: 65px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #bbb;
+            letter-spacing: 0.5px;
+        }
+
+        /* Контейнер кластеров */
+        .cluster-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            flex: 1;
+        }
+
+        /* Кластер (кружок с номером) */
+        .cluster {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            font-size: 14px;
+            font-weight: 500;
+            transition: transform 0.1s ease;
+            cursor: default;
+        }
+
+        /* Обычный КП — зелёный (приглушённый) */
+        .cluster.normal {
+            background: #2E7D32;
+            color: white;
+        }
+
+        /* Технический КП — оранжевый */
+        .cluster.technical {
+            background: #F57C00;
+            color: white;
+        }
+
+        /* КП, не входящие в класс — скрыты */
+        .cluster.hidden {
+            display: none;
+        }
+
+        /* Разделитель полей настроек (для контекста) */
+        .settings-divider {
+            height: 1px;
+            background: #333;
+            margin: 20px 0 16px 0;
+        }
+
+        .setting-field {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .setting-field label {
+            color: #ccc;
+            font-size: 14px;
+        }
+
+        .setting-field .value {
+            color: #4CAF50;
+            background: #2c2c2c;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .save-btn {
+            width: 100%;
+            background: #0D47A1;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+
+        .save-btn:hover {
+            background: #1565C0;
+        }
+
+        .note {
+            color: #666;
+            font-size: 11px;
+            text-align: center;
+            margin-top: 16px;
+        }
+    </style>
+</head>
+<body>
+<div class="settings-card">
+    <div class="card-header">
+        <h2>⚙️ Бяковские каменоломни 2026</h2>
+        <span>Активно</span>
+    </div>
+
+    <!-- БЛОК: Контрольные пункты -->
+    <div class="checkpoints-section">
+        <div class="section-title">🗺️ КОНТРОЛЬНЫЕ ПУНКТЫ</div>
+
+        <!-- КЛАСС 2 -->
+        <div class="class-row">
+            <div class="class-label">КЛАСС 2</div>
+            <div class="cluster-list" id="class2List"></div>
+        </div>
+
+        <!-- КЛАСС 3 -->
+        <div class="class-row">
+            <div class="class-label">КЛАСС 3</div>
+            <div class="cluster-list" id="class3List"></div>
+        </div>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <!-- Прочие настройки (для контекста) -->
+    <div class="setting-field">
+        <label>📏 Интервал старта</label>
+        <div class="value">60 сек</div>
+    </div>
+    <div class="setting-field">
+        <label>⏱️ КВ 2-й класс</label>
+        <div class="value">90 мин</div>
+    </div>
+    <div class="setting-field">
+        <label>⏱️ КВ 3-й класс</label>
+        <div class="value">60 мин</div>
+    </div>
+    <div class="setting-field">
+        <label>👥 Мин. состав команды</label>
+        <div class="value">2 чел</div>
+    </div>
+
+    <button class="save-btn" onclick="alert('Настройки сохранены (демо)')">💾 СОХРАНИТЬ НАСТРОЙКИ</button>
+    <div class="note">КП: зелёные — обычные, оранжевые — технические</div>
+</div>
+
+<script>
+    // Моковые данные КП (MasterRouteCardEntity)
+    const checkpoints = [
+        { displayNumber: 1, type: "normal", forClass2: true, forClass3: true },
+        { displayNumber: 2, type: "normal", forClass2: true, forClass3: true },
+        { displayNumber: 3, type: "technical", forClass2: true, forClass3: true },
+        { displayNumber: 4, type: "normal", forClass2: true, forClass3: false },
+        { displayNumber: 5, type: "normal", forClass2: true, forClass3: true },
+        { displayNumber: 6, type: "technical", forClass2: true, forClass3: true },
+        { displayNumber: 7, type: "normal", forClass2: true, forClass3: false },
+        { displayNumber: 8, type: "normal", forClass2: true, forClass3: true },
+        { displayNumber: 9, type: "normal", forClass2: false, forClass3: true },
+        { displayNumber: 10, type: "technical", forClass2: false, forClass3: true },
+        { displayNumber: 11, type: "normal", forClass2: false, forClass3: true },
+        { displayNumber: 12, type: "normal", forClass2: true, forClass3: false },
+        { displayNumber: 13, type: "normal", forClass2: true, forClass3: false },
+        { displayNumber: 14, type: "technical", forClass2: true, forClass3: true }
+    ];
+
+    function renderClusters() {
+        const class2Container = document.getElementById('class2List');
+        const class3Container = document.getElementById('class3List');
+
+        class2Container.innerHTML = '';
+        class3Container.innerHTML = '';
+
+        checkpoints.forEach(cp => {
+            // КЛАСС 2
+            if (cp.forClass2) {
+                const cluster = document.createElement('div');
+                cluster.className = `cluster ${cp.type}`;
+                cluster.textContent = cp.displayNumber;
+                class2Container.appendChild(cluster);
+            }
+
+            // КЛАСС 3
+            if (cp.forClass3) {
+                const cluster = document.createElement('div');
+                cluster.className = `cluster ${cp.type}`;
+                cluster.textContent = cp.displayNumber;
+                class3Container.appendChild(cluster);
+            }
+        });
+    }
+
+    renderClusters();
+</script>
+</body>
+</html>

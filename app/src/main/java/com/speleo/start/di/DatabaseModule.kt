@@ -2,9 +2,17 @@ package com.speleo.start.di
 
 import android.content.Context
 import androidx.room.Room
-import com.speleo.start.data.local.AppDatabase
-import com.speleo.start.data.local.dao.*
 import com.speleo.start.data.TestDataGenerator
+import com.speleo.start.data.local.AppDatabase
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.dao.CheckpointDao
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.dao.TeamRouteCardDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn

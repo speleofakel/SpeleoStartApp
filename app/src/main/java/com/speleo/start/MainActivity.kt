@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
@@ -21,6 +21,7 @@ import com.speleo.start.presentation.screen.competitions.CompetitionNewScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionSettingsScreen
 import com.speleo.start.presentation.screen.finish.FinishScreen
 import com.speleo.start.presentation.screen.home.HomeScreen
+import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 import com.speleo.start.presentation.screen.persons.PersonListScreen
 import com.speleo.start.presentation.screen.results.ResultsScreen
 import com.speleo.start.presentation.screen.routecard.RouteCardScreen
@@ -31,7 +32,6 @@ import com.speleo.start.presentation.screen.teamlist.TeamListScreen
 import com.speleo.start.ui.theme.SpeleoStartTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
-import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {

@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+/collect_project_files.py
+/vector_20260501_1_1.txt
+/vector_collect_project_files.py

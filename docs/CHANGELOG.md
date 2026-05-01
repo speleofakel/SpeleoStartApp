@@ -129,3 +129,36 @@
 
 ### ✅ Статус
 - Все 4 пункта ТЗ по экрану «Регистрация» реализованы и протестированы
+
+## [2026-05-01] — Экран настроек соревнования
+
+### Добавлено
+- Полная реализация `CompetitionSettingsScreen` по ТЗ
+- `CompetitionSettingsVM` с загрузкой по `competitionId`, валидацией, сохранением `settingsJson`
+- Отображение КП кластерами по классам с цветовой дифференциацией (normal/technical)
+- Диалог редактирования типа КП
+- Интеграция с `MasterRouteCardRepository` через Flow
+- Визуальная группировка КП в рамки с label класса на границе
+
+### Изменено
+- `Icons.Default.ArrowBack` → `Icons.AutoMirrored.Filled.ArrowBack` (deprecated fix)
+
+### Технические детали
+- Sealed class `SettingsUiEvent` (изолирован от общего `UiEvent`)
+- Использование `FlowRow` для адаптивного расположения кластеров
+- `OutlinedCard` + круглый label с `offset` для позиционирования на границе
+
+## [2026-05-01] — Экран настроек соревнования
+
+### Добавлено
+- Полная реализация `CompetitionSettingsScreen` по ТЗ
+- `CompetitionSettingsVM` с загрузкой по `competitionId`, валидацией, сохранением `settingsJson`
+- Отображение КП кластерами по классам (КЛАСС 2 / КЛАСС 3)
+- Цветовая дифференциация КП: зелёный `#2E7D32` (normal), оранжевый `#F57C00` (technical)
+- Диалог редактирования типа КП (обычный/технический)
+- Интеграция с `MasterRouteCardRepository` через Flow
+- Визуальная группировка КП в рамки `OutlinedCard` с круглым label класса на границе
+- Поле «Минимальный состав команды» в `settingsJson`
+
+### Изменено
+- `Icons.Default.ArrowBack` → `Icons.AutoMirrored.Filled.ArrowBack` (deprecated fix)

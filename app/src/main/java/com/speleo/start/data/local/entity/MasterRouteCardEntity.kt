@@ -2,8 +2,8 @@ package com.speleo.start.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
-import androidx.room.PrimaryKey
 import androidx.room.Index
+import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "master_route_card",
@@ -15,7 +15,7 @@ import androidx.room.Index
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["competitionId"])]  // ← добавить
+    indices = [Index(value = ["competitionId"])]
 )
 data class MasterRouteCardEntity(
     @PrimaryKey(autoGenerate = true)
@@ -23,7 +23,7 @@ data class MasterRouteCardEntity(
     val competitionId: Long,
     val displayNumber: Int,
     val weight: Int = 1,
-    val type: String = "normal",
+    val type: String = "normal",  // "normal" или "technical"
     val sortOrder: Int,
     val normativeSeconds: Int = 0,
     val forClass2: Boolean = true,
