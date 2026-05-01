@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ParticipantDao {
-
     @Query("SELECT * FROM participants WHERE teamId = :teamId AND statusMember = 'active'")
     fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
 
@@ -17,14 +16,24 @@ interface ParticipantDao {
     fun getAllParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
 
     @Query("""
-        SELECT * FROM participants 
-        WHERE statusMember = 'free_agent' 
+        SELECT * FROM participants
+        WHERE statusMember = 'free_agent'
         AND teamId IN (SELECT id FROM teams WHERE competitionId = :competitionId)
     """)
     fun getFreeAgents(competitionId: Long): Flow<List<ParticipantEntity>>
 
     @Query("SELECT * FROM participants WHERE id = :id")
     suspend fun getParticipantById(id: Long): ParticipantEntity?
+
+    @Query("""
+        SELECT p.* FROM participants p
+        JOIN teams t ON p.teamId = t.id
+        WHERE p.personId = :personId 
+        AND t.competitionId = :competitionId 
+        AND p.statusMember = 'active'
+        LIMIT 1
+    """)
+    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity?
 
     @Insert
     suspend fun insert(participant: ParticipantEntity): Long
@@ -43,4 +52,18 @@ interface ParticipantDao {
 
     @Query("DELETE FROM participants")
     suspend fun deleteAll()
+
+    @Query("""
+        UPDATE participants
+        SET mentorId = :mentorId,
+            mentorConfirmed = :mentorConfirmed,
+            judgeApproved = :judgeApproved
+        WHERE id = :id
+    """)
+    suspend fun updateMentorAndFlags(
+        id: Long,
+        mentorId: Long?,
+        mentorConfirmed: Boolean,
+        judgeApproved: Boolean
+    )
 }

@@ -18,6 +18,7 @@ data class TeamListInfo(
     val className: String,
     val status: String,
     val colorMark: String = "",
+    val memberNames: String = "",
     val timeInfo: String = ""
 )
 
@@ -49,43 +50,36 @@ class TeamListVM @Inject constructor(
                 .collect { teams ->
                     val result = teams.map { team ->
                         val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                        val memberNames = participants.mapNotNull { p ->
-                            val person = personRepo.getPersonById(p.personId)
-                            person?.lastName
-                        }.joinToString(", ")
+                        val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
 
-                        val hasMinor = run {
-                            val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
-                            persons.any { person ->
-                                person.birthDate?.let { birth ->
-                                    try {
-                                        val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                        val bd = sdf.parse(birth)
-                                        val today = java.util.Calendar.getInstance()
-                                        val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                        var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                        if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                        age in 14..17
-                                    } catch (e: Exception) { false }
-                                } ?: false
-                            }
+                        val memberNames = persons.joinToString(", ") { "${it.lastName} ${it.firstName.take(1)}." }
+
+                        val hasMinor = persons.any { person ->
+                            person.birthDate?.let { birth ->
+                                try {
+                                    val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                                    val bd = sdf.parse(birth)
+                                    val today = java.util.Calendar.getInstance()
+                                    val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                    var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
+                                    if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                                    age in 14..17
+                                } catch (e: Exception) { false }
+                            } ?: false
                         }
 
-                        val hasChild = run {
-                            val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
-                            persons.any { person ->
-                                person.birthDate?.let { birth ->
-                                    try {
-                                        val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                        val bd = sdf.parse(birth)
-                                        val today = java.util.Calendar.getInstance()
-                                        val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                        var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                        if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                        age < 14
-                                    } catch (e: Exception) { false }
-                                } ?: false
-                            }
+                        val hasChild = persons.any { person ->
+                            person.birthDate?.let { birth ->
+                                try {
+                                    val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                                    val bd = sdf.parse(birth)
+                                    val today = java.util.Calendar.getInstance()
+                                    val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                    var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
+                                    if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                                    age < 14
+                                } catch (e: Exception) { false }
+                            } ?: false
                         }
 
                         val colorMark = when {
@@ -102,6 +96,7 @@ class TeamListVM @Inject constructor(
                             className = team.className,
                             status = team.status,
                             colorMark = colorMark,
+                            memberNames = memberNames,
                             timeInfo = when (team.status) {
                                 "started" -> "В пути"
                                 "finished" -> "Финиш"

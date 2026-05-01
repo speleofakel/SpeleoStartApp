@@ -37,12 +37,14 @@ fun PersonNewScreen(
     var noBirthDate by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
     var phoneState by remember { mutableStateOf(TextFieldValue("")) }
-    var email by remember { mutableStateOf("") }
-    var showEmail by remember { mutableStateOf(false) }
     var gender by remember { mutableStateOf("male") }
 
+    // Проверка валидности даты — используем isRealDate вместо isValid
+    val isDateValid = birthDate.isBlank() ||
+            (birthDate.length == 10 && DateValidator.isRealDate(birthDate))
+
     val age = remember(birthDate) {
-        if (!noBirthDate && birthDate.length == 10 && DateValidator.isValid(birthDate)) {
+        if (!noBirthDate && birthDate.length == 10 && DateValidator.isRealDate(birthDate)) {
             try {
                 val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
                 val birth = sdf.parse(birthDate)
@@ -85,10 +87,8 @@ fun PersonNewScreen(
                 label = "Имя",
                 modifier = Modifier.fillMaxWidth()
             )
-            // Отчество (скрытое, но тоже TitleCase)
-            // Скрытые поля: Отчество + Позывной
-            var showExtraFields by remember { mutableStateOf(false) }
 
+            // Скрытые поля: Отчество + Позывной
             TextButton(onClick = { showExtraFields = !showExtraFields }) {
                 Text(if (showExtraFields) "▾ Дополнительно" else "▸ Дополнительно")
             }
@@ -109,13 +109,23 @@ fun PersonNewScreen(
                     )
                 }
             }
+
             // Дата рождения
             if (!noBirthDate) {
                 DateOfBirthField(
                     value = birthDate,
                     onValueChange = { birthDate = it },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = !isDateValid && birthDate.isNotBlank()
                 )
+                if (!isDateValid && birthDate.isNotBlank()) {
+                    Text(
+                        "Некорректная дата",
+                        color = Color(0xFFD32F2F),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                }
                 age?.let {
                     val color = when {
                         it < 14 -> Color(0xFFD32F2F)
@@ -129,11 +139,13 @@ fun PersonNewScreen(
                     }
                 }
             }
+
             // Чекбокс «Без даты рождения»
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = noBirthDate, onCheckedChange = { noBirthDate = it })
                 Text("Без даты рождения", fontSize = 14.sp)
             }
+
             // Телефон
             OutlinedTextField(
                 value = phoneState,
@@ -148,17 +160,7 @@ fun PersonNewScreen(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
             )
-            // Email (скрытый)
-            TextButton(onClick = { showEmail = !showEmail }) {
-                Text(if (showEmail) "▾ Email" else "▸ Email")
-            }
-            AnimatedVisibility(visible = showEmail) {
-                OutlinedTextField(
-                    value = email, onValueChange = { email = it },
-                    label = { Text("Email") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
-                )
-            }
+
             // Пол
             Text("Пол", fontSize = 14.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -166,21 +168,22 @@ fun PersonNewScreen(
                     FilterChip(selected = gender == v, onClick = { gender = v }, label = { Text(l) })
                 }
             }
-            // Кнопка сохранения
+
+            // Кнопка сохранения — блокируется при некорректной дате
             Button(
                 onClick = {
                     vm.savePerson(
                         lastName = lastName,
                         firstName = firstName,
                         middleName = middleName.ifBlank { null },
-                        nickname = nickname.ifBlank { null },  // ← НОВОЕ
+                        nickname = nickname.ifBlank { null },
                         birthDate = if (noBirthDate) null else birthDate.ifBlank { null },
                         phone = phone.ifBlank { null },
                         gender = gender
                     ) { onSaved() }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = lastName.isNotBlank() && firstName.isNotBlank()
+                enabled = lastName.isNotBlank() && firstName.isNotBlank() && isDateValid
             ) {
                 Text("СОХРАНИТЬ")
             }
@@ -189,7 +192,12 @@ fun PersonNewScreen(
 }
 
 @Composable
-fun DateOfBirthField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
+fun DateOfBirthField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false
+) {
     // НЕ используем remember(value) — храним состояние отдельно
     var state by remember {
         mutableStateOf(TextFieldValue(value, TextRange(value.length)))
@@ -229,6 +237,7 @@ fun DateOfBirthField(value: String, onValueChange: (String) -> Unit, modifier: M
         label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
         modifier = modifier,
         singleLine = true,
+        isError = isError,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
     )
 }

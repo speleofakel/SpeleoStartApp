@@ -107,7 +107,14 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable(Screen.Register.route) {
-                            TeamRegisterScreen(onBack = { navController.popBackStack() })
+                            TeamRegisterScreen(
+                                onBack = { navController.popBackStack() },
+                                onNavigateToTeam = { teamId ->
+                                    navController.navigate(Screen.TeamCard.pass(teamId)) {
+                                        popUpTo(Screen.Register.route) { inclusive = true }
+                                    }
+                                }
+                            )
                         }
                         composable(Screen.Start.route) {
                             StartScreen(onBack = { navController.popBackStack() })

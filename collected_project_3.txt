@@ -1,3 +1,130 @@
+app/src/main/java/com/speleo/start/presentation/screen/results/ResultsVM.kt>>>
+package com.speleo.start.presentation.screen.results
+
+import androidx.lifecycle.ViewModel
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.TeamRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import javax.inject.Inject
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
+
+
+data class TeamResult(
+    val number: Int,
+    val className: String,
+    val members: String = "",
+    val score: Int = 0,
+    val time: String = "",
+    val status: String = ""
+)
+
+@HiltViewModel
+class ResultsVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _results2 = MutableStateFlow<List<TeamResult>>(emptyList())
+    val results2: StateFlow<List<TeamResult>> = _results2.asStateFlow()
+
+    private val _results3 = MutableStateFlow<List<TeamResult>>(emptyList())
+    val results3: StateFlow<List<TeamResult>> = _results3.asStateFlow()
+
+    fun loadResults() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            teamRepo.getFinishedTeams(cid)
+                .map { teams ->
+                    teams.map { t ->
+                        TeamResult(
+                            number = t.teamNumber,
+                            className = t.className,
+                            status = t.status,
+                            time = t.finishTimestamp?.let { "${(it - (t.startTimestamp ?: 0)) / 60000} мин" } ?: "-"
+                        )
+                    }.sortedByDescending { it.score }
+                }
+                .collect { all ->
+                    _results2.value = all.filter { it.className == "2" }
+                    _results3.value = all.filter { it.className == "3" }
+                }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/routecard/RouteCardScreen.kt>>>
+package com.speleo.start.presentation.screen.routecard
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RouteCardScreen(
+    teamId: Long,
+    onBack: () -> Unit,
+    vm: RouteCardVM = hiltViewModel()
+) {
+    val entries by vm.entries.collectAsStateWithLifecycle()
+
+    LaunchedEffect(teamId) { vm.loadRouteCard(teamId) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Путевой лист") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            itemsIndexed(entries) { index, entry ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(8.dp)) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("КП №${entry.displayNumber} (вес ${entry.weight})", fontSize = 16.sp)
+                            Text(if (entry.type == "technical") "Тех" else "КП", fontSize = 14.sp)
+                        }
+                        Column {
+                            Checkbox(checked = entry.taken, onCheckedChange = { vm.toggleTaken(index) })
+                            Text("Взят", fontSize = 10.sp)
+                        }
+                        if (entry.taken) {
+                            Column {
+                                Checkbox(checked = entry.takenWithError, onCheckedChange = { vm.toggleError(index) })
+                                Text("Ошибка", fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { vm.save() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("СОХРАНИТЬ")
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
 app/src/main/java/com/speleo/start/presentation/screen/routecard/RouteCardVM.kt>>>
 package com.speleo.start.presentation.screen.routecard
 
@@ -326,17 +453,39 @@ class StartVM @Inject constructor(
 app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterScreen.kt>>>
 package com.speleo.start.presentation.screen.team
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.presentation.component.TitleCaseTextField
+import com.speleo.start.util.DateValidator
+import com.speleo.start.util.PhoneFormatter
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -346,20 +495,58 @@ fun TeamRegisterScreen(
 ) {
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val searchResults by vm.searchResults.collectAsStateWithLifecycle()
+    val minTeamSize by vm.minTeamSize.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
     var selectedClass by remember { mutableStateOf("2") }
-    var selectedPersonIds by remember { mutableStateOf(listOf<Long>()) }
+    var members by remember { mutableStateOf(listOf<MemberDraft>()) }
+    var showMentorPickerFor by remember { mutableStateOf<Int?>(null) }
+    var mentorSearchQuery by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(Unit) {
+        vm.loadCompetitionSettings()
+        vm.event.collectLatest { event ->
+            when (event) {
+                is TeamRegisterVM.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
+                is TeamRegisterVM.UiEvent.NavigateBack -> onBack()
+            }
+        }
+    }
+
+    val allRequirementsMet = remember(members) {
+        members.all { member ->
+            when (member.ageGroup) {
+                AgeGroup.ADULT -> true
+                AgeGroup.MINOR -> member.mentor != null && member.mentorConfirmed
+                AgeGroup.CHILD -> member.mentor != null && member.mentorConfirmed && member.judgeApproved
+                AgeGroup.UNKNOWN -> false
+            }
+        }
+    }
+
+    val canSave = members.size >= minTeamSize && allRequirementsMet && members.all { it.isValid }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Регистрация команды") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text("← Назад") }
+                }
             )
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // === КЛАСС ===
             Text("Класс:", fontSize = 14.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("2" to "2-й класс", "3" to "3-й класс").forEach { (v, l) ->
@@ -371,43 +558,89 @@ fun TeamRegisterScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // === ПОЛЕ ПОИСКА — МАКСИМАЛЬНО ВЫСОКО ===
+            val emptyIndex = members.indexOfFirst { it.person == null && !it.isQuickCreate }
 
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { vm.onSearchQueryChange(it) },
-                label = { Text("🔍 Поиск участника по фамилии") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            if (emptyIndex >= 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "🔍 Поиск участника ${emptyIndex + 1}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
 
-            Spacer(modifier = Modifier.height(8.dp))
+                        // Поисковое поле
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { vm.onSearchQueryChange(it) },
+                            label = { Text("Фамилия") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                imeAction = ImeAction.Search,
+                                keyboardType = KeyboardType.Text
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onSearch = { focusManager.clearFocus() }
+                            )
+                        )
 
-            Text("Выбрано: ${selectedPersonIds.size} участников", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyColumn {
-                items(searchResults) { person ->
-                    val isSelected = selectedPersonIds.contains(person.id)
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                            .clickable {
-                                selectedPersonIds = if (isSelected) {
-                                    selectedPersonIds - person.id
-                                } else {
-                                    selectedPersonIds + person.id
+                        // Результаты поиска
+                        AnimatedVisibility(visible = searchResults.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                searchResults.forEach { person ->
+                                    PersonSearchResultItem(
+                                        person = person,
+                                        onClick = {
+                                            members = members.toMutableList().also {
+                                                it[emptyIndex] = members[emptyIndex].copy(
+                                                    person = person,
+                                                    ageGroup = calculateAgeGroup(person.birthDate),
+                                                    isQuickCreate = false
+                                                )
+                                            }
+                                            vm.onSearchQueryChange("")
+                                            focusManager.clearFocus()
+                                        }
+                                    )
                                 }
                             }
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp)) {
-                            Checkbox(checked = isSelected, onCheckedChange = null)
+                        }
+
+                        // Пустая выдача
+                        AnimatedVisibility(
+                            visible = searchQuery.length >= 2 && searchResults.isEmpty()
+                        ) {
                             Column {
-                                Text("${person.lastName} ${person.firstName}", style = MaterialTheme.typography.titleSmall)
-                                if (person.birthDate != null) {
-                                    Text("📅 ${person.birthDate}", fontSize = 14.sp)
+                                Text(
+                                    "Ничего не найдено",
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        members = members.toMutableList().also {
+                                            it[emptyIndex] = members[emptyIndex].copy(
+                                                isQuickCreate = true,
+                                                quickLastName = searchQuery
+                                            )
+                                        }
+                                        vm.onSearchQueryChange("")
+                                        focusManager.clearFocus()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("➕ Создать: $searchQuery")
                                 }
                             }
                         }
@@ -415,20 +648,580 @@ fun TeamRegisterScreen(
                 }
             }
 
+            // === СПИСОК УЧАСТНИКОВ ===
+            Text(
+                "Участники (${members.size}/$minTeamSize мин.):",
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            members.forEachIndexed { index, member ->
+                MemberCard(
+                    index = index,
+                    member = member,
+                    onRemove = {
+                        members = members.toMutableList().also { it.removeAt(index) }
+                    },
+                    onToggleJudgeApproval = {
+                        members = members.toMutableList().also {
+                            it[index] = member.copy(judgeApproved = !member.judgeApproved)
+                        }
+                    },
+                    onOpenMentorPicker = { showMentorPickerFor = index },
+                    onRemoveMentor = {
+                        members = members.toMutableList().also {
+                            it[index] = member.copy(mentor = null, mentorConfirmed = false)
+                        }
+                    },
+                    onUpdateQuickFields = { updated ->
+                        members = members.toMutableList().also {
+                            it[index] = updated
+                        }
+                    }
+                )
+            }
+
+            if (members.size < 6) {
+                OutlinedButton(
+                    onClick = { members = members + MemberDraft() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("➕ Добавить участника")
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
-                    vm.registerTeam(selectedClass, selectedPersonIds) {
-                        onBack()
-                    }
+                    vm.registerTeam(className = selectedClass, members = members)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = selectedPersonIds.size >= 2
+                enabled = canSave
             ) {
                 Text("СОХРАНИТЬ КОМАНДУ")
             }
+
+            if (!allRequirementsMet && members.isNotEmpty()) {
+                Text(
+                    "⚠️ Проверьте менторов и разрешения судьи",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // === ДИАЛОГ ВЫБОРА МЕНТОРА ===
+    if (showMentorPickerFor != null) {
+        val memberIndex = showMentorPickerFor!!
+        AlertDialog(
+            onDismissRequest = { showMentorPickerFor = null },
+            title = { Text("Выбор ментора") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = mentorSearchQuery,
+                        onValueChange = {
+                            mentorSearchQuery = it
+                            vm.onMentorSearchQueryChange(it)
+                        },
+                        label = { Text("🔍 Фамилия ментора (≥18)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val mentorResults by vm.mentorSearchResults.collectAsStateWithLifecycle()
+                    LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
+                        items(mentorResults) { person ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        members = members.toMutableList().also {
+                                            it[memberIndex] = members[memberIndex].copy(
+                                                mentor = person,
+                                                mentorConfirmed = true
+                                            )
+                                        }
+                                        showMentorPickerFor = null
+                                        mentorSearchQuery = ""
+                                        vm.onMentorSearchQueryChange("")
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${person.lastName} ${person.firstName}",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                val age = DateValidator.calculateAge(person.birthDate)
+                                if (age != null) {
+                                    Text("$age лет", fontSize = 12.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+
+                    if (mentorSearchQuery.length >= 2 && mentorResults.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                vm.createQuickMentor(
+                                    lastName = mentorSearchQuery,
+                                    firstName = ""
+                                ) { newMentorId ->
+                                    vm.getPersonById(newMentorId) { person ->
+                                        person?.let {
+                                            members = members.toMutableList().also {
+                                                it[memberIndex] = members[memberIndex].copy(
+                                                    mentor = person,
+                                                    mentorConfirmed = true
+                                                )
+                                            }
+                                        }
+                                    }
+                                    showMentorPickerFor = null
+                                    mentorSearchQuery = ""
+                                    vm.onMentorSearchQueryChange("")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("➕ Быстрый ментор: $mentorSearchQuery")
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showMentorPickerFor = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun PersonSearchResultItem(
+    person: PersonEntity,
+    onClick: () -> Unit
+) {
+    val age = DateValidator.calculateAge(person.birthDate)
+    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
+    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    person.lastName.take(1).uppercase(),
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "${person.lastName} ${person.firstName}",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp
+                )
+                if (person.nickname != null) {
+                    Text("«${person.nickname}»", fontSize = 11.sp, color = Color.Gray)
+                }
+            }
+            if (age != null) {
+                Text(
+                    "$age лет",
+                    fontSize = 13.sp,
+                    color = ageColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemberCard(
+    index: Int,
+    member: MemberDraft,
+    onRemove: () -> Unit,
+    onToggleJudgeApproval: () -> Unit,
+    onOpenMentorPicker: () -> Unit,
+    onRemoveMentor: () -> Unit,
+    onUpdateQuickFields: (MemberDraft) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                member.person == null && !member.isQuickCreate -> MaterialTheme.colorScheme.surfaceVariant
+                !member.isValid -> MaterialTheme.colorScheme.errorContainer
+                else -> MaterialTheme.colorScheme.surface
+            }
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Узкая полоска с ролью
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (index == 0) "👑 Капитан" else "👤 Участник",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .background(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small
+                        )
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                )
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Text("✕", fontSize = 14.sp, color = MaterialTheme.colorScheme.error)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            when {
+                member.isQuickCreate -> {
+                    QuickCreateForm(
+                        member = member,
+                        onUpdate = onUpdateQuickFields
+                    )
+                }
+
+                member.person != null -> {
+                    val person = member.person!!
+                    val age = DateValidator.calculateAge(person.birthDate)
+                    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
+                    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                person.lastName.take(1).uppercase(),
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "${person.lastName} ${person.firstName}",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 15.sp
+                            )
+                            if (age != null) {
+                                Text(
+                                    "$age лет · ${ageMark.label}",
+                                    fontSize = 12.sp,
+                                    color = ageColor
+                                )
+                            }
+                        }
+                    }
+
+                    when (member.ageGroup) {
+                        AgeGroup.MINOR, AgeGroup.CHILD -> {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            if (member.mentor != null) {
+                                MentorRow(
+                                    mentor = member.mentor!!,
+                                    onRemoveMentor = onRemoveMentor
+                                )
+                            } else {
+                                OutlinedButton(
+                                    onClick = onOpenMentorPicker,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(vertical = 4.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    )
+                                ) {
+                                    Text("⚠️ Ментор", fontSize = 12.sp)
+                                }
+                            }
+
+                            if (member.ageGroup == AgeGroup.CHILD) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = member.judgeApproved,
+                                        onCheckedChange = { onToggleJudgeApproval() },
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Text("Разрешено судьёй", fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        else -> {}
+                    }
+                }
+
+                else -> {
+                    Text(
+                        "Введите фамилию в поле поиска выше",
+                        color = Color.Gray,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MentorRow(
+    mentor: PersonEntity,
+    onRemoveMentor: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            "👨‍🏫 ${mentor.lastName} ${mentor.firstName}",
+            fontSize = 13.sp,
+            color = Color(0xFF1E5A7A)
+        )
+        TextButton(
+            onClick = onRemoveMentor,
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) {
+            Text("Сменить", fontSize = 11.sp)
+        }
+    }
+}
+
+// === ОБРАЗЕЦ ИЗ PersonNewScreen: дата рождения ===
+@Composable
+private fun QuickCreateForm(
+    member: MemberDraft,
+    onUpdate: (MemberDraft) -> Unit
+) {
+    var showExtra by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+
+    val isDateValid = member.quickBirthDate.isBlank() ||
+            (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate))
+    val dateHasError = member.quickBirthDate.isNotBlank() && !isDateValid
+
+    val age = if (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate)) {
+        DateValidator.calculateAge(member.quickBirthDate)
+    } else null
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TitleCaseTextField(
+            value = member.quickLastName,
+            onValueChange = { onUpdate(member.copy(quickLastName = it)) },
+            label = "Фамилия",
+            modifier = Modifier.fillMaxWidth(),
+            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+        )
+
+        TitleCaseTextField(
+            value = member.quickFirstName,
+            onValueChange = { onUpdate(member.copy(quickFirstName = it)) },
+            label = "Имя",
+            modifier = Modifier.fillMaxWidth(),
+            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+        )
+
+        TextButton(
+            onClick = { showExtra = !showExtra },
+            contentPadding = PaddingValues(vertical = 0.dp)
+        ) {
+            Text(if (showExtra) "▾ Доп." else "▸ Доп.", fontSize = 12.sp)
+        }
+
+        AnimatedVisibility(visible = showExtra) {
+            TitleCaseTextField(
+                value = member.quickMiddleName,
+                onValueChange = { onUpdate(member.copy(quickMiddleName = it)) },
+                label = "Отчество",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // === ДАТА РОЖДЕНИЯ — ОБРАЗЕЦ ИЗ PersonNewScreen ===
+        var dateState by remember {
+            mutableStateOf(TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length)))
+        }
+
+        LaunchedEffect(member.quickBirthDate) {
+            if (dateState.text != member.quickBirthDate) {
+                dateState = TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))
+            }
+        }
+
+        OutlinedTextField(
+            value = dateState,
+            onValueChange = { newVal ->
+                val digits = newVal.text.filter { it.isDigit() }.take(8)
+                val formatted = buildString {
+                    for (i in digits.indices) {
+                        if (i == 2 || i == 4) append(".")
+                        append(digits[i])
+                    }
+                }
+                val newCursor = newVal.selection.start.coerceIn(0, formatted.length)
+                dateState = newVal.copy(text = formatted, selection = TextRange(newCursor))
+                onUpdate(member.copy(quickBirthDate = formatted))
+
+                if (formatted.length == 10) {
+                    focusManager.moveFocus(FocusDirection.Down)
+                }
+            },
+            label = { Text(if (dateHasError) "Некорректная дата" else "Дата рождения") },
+            isError = dateHasError,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Next
+            )
+        )
+
+        if (dateHasError) {
+            Text(
+                "Некорректная дата",
+                color = Color(0xFFD32F2F),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 16.dp)
+            )
+        } else if (age != null) {
+            val color = when {
+                age < 14 -> Color(0xFFD32F2F)
+                age in 14..17 -> Color(0xFFFF8C00)
+                age > 70 -> Color(0xFFFF8C00)
+                else -> Color(0xFF00A86B)
+            }
+            Text("Возраст: $age лет", color = color, fontSize = 12.sp)
+        }
+
+        // === ТЕЛЕФОН — ОБРАЗЕЦ ИЗ PersonNewScreen ===
+        var phoneState by remember {
+            mutableStateOf(TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length)))
+        }
+
+        LaunchedEffect(member.quickPhone) {
+            if (phoneState.text != member.quickPhone) {
+                phoneState = TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length))
+            }
+        }
+
+        OutlinedTextField(
+            value = phoneState,
+            onValueChange = { newVal ->
+                val digits = newVal.text.filter { it.isDigit() }
+                val formatted = PhoneFormatter.formatAsYouType(digits)
+                phoneState = TextFieldValue(formatted, TextRange(formatted.length))
+                onUpdate(member.copy(quickPhone = formatted))
+            },
+            label = { Text("Телефон") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+        )
+
+        // Пол
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("male" to "М", "female" to "Ж").forEach { (v, l) ->
+                FilterChip(
+                    selected = member.quickGender == v,
+                    onClick = { onUpdate(member.copy(quickGender = v)) },
+                    label = { Text(l, fontSize = 12.sp) }
+                )
+            }
+        }
+
+        // Кнопка сохранения
+        val canSavePerson = member.quickLastName.isNotBlank() &&
+                member.quickFirstName.isNotBlank() &&
+                isDateValid
+
+        Button(
+            onClick = {
+                // Сохраняем персону через VM
+                onUpdate(member.copy(isQuickCreate = false))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = canSavePerson
+        ) {
+            Text("💾 СОХРАНИТЬ", fontSize = 13.sp)
+        }
+    }
+}
+
+enum class AgeGroup { ADULT, MINOR, CHILD, UNKNOWN }
+
+data class MemberDraft(
+    val person: PersonEntity? = null,
+    val isQuickCreate: Boolean = false,
+    val ageGroup: AgeGroup = AgeGroup.UNKNOWN,
+    val mentor: PersonEntity? = null,
+    val mentorConfirmed: Boolean = false,
+    val judgeApproved: Boolean = false,
+    var quickLastName: String = "",
+    var quickFirstName: String = "",
+    var quickMiddleName: String = "",
+    var quickBirthDate: String = "",
+    var quickPhone: String = "",
+    var quickGender: String = "male"
+) {
+    val isValid: Boolean
+        get() = when {
+            person != null -> true
+            isQuickCreate -> quickLastName.isNotBlank() &&
+                    quickFirstName.isNotBlank() &&
+                    (quickBirthDate.isBlank() || (quickBirthDate.length == 10 && DateValidator.isRealDate(quickBirthDate)))
+            else -> false
+        }
+}
+
+private fun calculateAgeGroup(birthDate: String?): AgeGroup {
+    val age = DateValidator.calculateAge(birthDate) ?: return AgeGroup.UNKNOWN
+    return when {
+        age >= 18 -> AgeGroup.ADULT
+        age in 14..17 -> AgeGroup.MINOR
+        else -> AgeGroup.CHILD
     }
 }
 <<<конец файла
@@ -439,8 +1232,11 @@ package com.speleo.start.presentation.screen.team
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.repository.CompetitionRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.data.repository.ParticipantRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -450,11 +1246,16 @@ import javax.inject.Inject
 class TeamRegisterVM @Inject constructor(
     private val teamRepo: TeamRepository,
     private val personRepo: PersonRepository,
+    private val participantRepo: ParticipantRepository,
+    private val competitionRepo: CompetitionRepository,
     private val prefs: PreferencesManager
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _mentorSearchQuery = MutableStateFlow("")
+    val mentorSearchQuery: StateFlow<String> = _mentorSearchQuery.asStateFlow()
 
     val searchResults = _searchQuery
         .debounce(300)
@@ -464,19 +1265,190 @@ class TeamRegisterVM @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val mentorSearchResults = _mentorSearchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.length >= 2) {
+                personRepo.searchPersons(query).map { list ->
+                    list.filter { person ->
+                        val age = com.speleo.start.util.DateValidator.calculateAge(person.birthDate)
+                        age != null && age >= 18
+                    }
+                }
+            } else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _minTeamSize = MutableStateFlow(2)
+    val minTeamSize: StateFlow<Int> = _minTeamSize.asStateFlow()
+
+    private val _event = MutableSharedFlow<UiEvent>()
+    val event: SharedFlow<UiEvent> = _event.asSharedFlow()
+
+    sealed class UiEvent {
+        data class ShowMessage(val message: String) : UiEvent()
+        object NavigateBack : UiEvent()
+    }
+
+    fun loadCompetitionSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val json = comp.settingsJson
+            val minSize = try {
+                val regex = """"min_team_size"\s*:\s*(\d+)""".toRegex()
+                regex.find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 2
+            } catch (e: Exception) { 2 }
+            _minTeamSize.value = minSize
+        }
+    }
+
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
     }
 
+    fun onMentorSearchQueryChange(query: String) {
+        _mentorSearchQuery.value = query
+    }
+
+    fun getPersonById(id: Long, callback: (PersonEntity?) -> Unit) {
+        viewModelScope.launch {
+            val person = personRepo.getPersonById(id)
+            callback(person)
+        }
+    }
+
+    fun createQuickMentor(
+        lastName: String,
+        firstName: String,
+        onCreated: (Long) -> Unit
+    ) {
+        viewModelScope.launch {
+            val id = personRepo.createPerson(
+                lastName = lastName,
+                firstName = firstName.ifBlank { "Ментор" },
+                birthDate = null,
+                gender = null
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("Ментор создан"))
+                onCreated(id)
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+            }
+        }
+    }
+
+    fun createQuickPerson(
+        lastName: String,
+        firstName: String,
+        middleName: String? = null,
+        birthDate: String? = null,
+        phone: String? = null,
+        gender: String? = null,
+        onCreated: (Long) -> Unit
+    ) {
+        viewModelScope.launch {
+            val id = personRepo.createPerson(
+                lastName = lastName,
+                firstName = firstName,
+                middleName = middleName,
+                birthDate = birthDate,
+                phone = phone,
+                gender = gender
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("Персона создана"))
+                onCreated(id)
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+            }
+        }
+    }
+
     fun registerTeam(
         className: String,
-        personIds: List<Long>,
-        onSuccess: () -> Unit
+        members: List<MemberDraft>
     ) {
         viewModelScope.launch {
             val competitionId = prefs.activeCompetitionId
-            val teams = teamRepo.getTeamsByCompetition(competitionId)
-            // Эта часть требует Flow-подписки, пока упростим
+            if (competitionId == -1L) {
+                _event.emit(UiEvent.ShowMessage("Нет активного соревнования"))
+                return@launch
+            }
+
+            val resolvedMembers = members.map { draft ->
+                if (draft.isQuickCreate) {
+                    val personId = personRepo.createPerson(
+                        lastName = draft.quickLastName,
+                        firstName = draft.quickFirstName,
+                        middleName = draft.quickMiddleName.ifBlank { null },
+                        birthDate = draft.quickBirthDate.ifBlank { null },
+                        phone = draft.quickPhone.ifBlank { null },
+                        gender = draft.quickGender
+                    )
+                    if (personId == -1L) {
+                        _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+                        return@launch
+                    }
+                    draft.copy(person = personRepo.getPersonById(personId))
+                } else draft
+            }
+
+            val invalidMembers = resolvedMembers.filter { member ->
+                when (member.ageGroup) {
+                    AgeGroup.MINOR -> member.mentor == null
+                    AgeGroup.CHILD -> member.mentor == null || !member.judgeApproved
+                    else -> false
+                }
+            }
+            if (invalidMembers.isNotEmpty()) {
+                _event.emit(UiEvent.ShowMessage("Проверьте менторов и разрешения судьи"))
+                return@launch
+            }
+
+            val maxNumber = teamRepo.getMaxTeamNumber(competitionId, className) ?: 0
+            val teamNumber = maxNumber + 1
+
+            val teamId = teamRepo.createTeam(
+                competitionId = competitionId,
+                teamNumber = teamNumber,
+                className = className
+            )
+            if (teamId == -1L) {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания команды"))
+                return@launch
+            }
+
+            resolvedMembers.forEachIndexed { index, member ->
+                val person = member.person ?: return@forEachIndexed
+                val mentorId = member.mentor?.id
+
+                val participantId = participantRepo.addParticipant(
+                    teamId = teamId,
+                    personId = person.id,
+                    role = if (index == 0) "captain" else "member",
+                    mentorId = mentorId
+                )
+
+                if (participantId == -1L) {
+                    _event.emit(UiEvent.ShowMessage("Ошибка добавления участника"))
+                    return@launch
+                }
+
+                if (mentorId != null || member.judgeApproved) {
+                    participantRepo.updateMentorAndFlags(
+                        id = participantId,
+                        mentorId = mentorId,
+                        mentorConfirmed = member.mentor != null,
+                        judgeApproved = member.judgeApproved
+                    )
+                }
+            }
+
+            _event.emit(UiEvent.ShowMessage("Команда №$teamNumber сохранена"))
+            _event.emit(UiEvent.NavigateBack)
         }
     }
 }
@@ -761,7 +1733,6 @@ fun TeamListScreen(
                 .padding(padding)
                 .padding(12.dp)
         ) {
-            // Поиск
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { vm.onSearchQueryChange(it) },
@@ -772,7 +1743,6 @@ fun TeamListScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Пустой список
             if (teams.isEmpty()) {
                 Text("Нет команд", fontSize = 16.sp)
             } else {
@@ -787,24 +1757,38 @@ fun TeamListScreen(
                                     onTeamClick(team.id)
                                 }
                         ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                // Номер и класс
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "№${team.number} (${team.className}-й кл)",
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                    Text(
+                                        team.colorMark,
+                                        fontSize = 14.sp,
+                                        color = when (team.colorMark) {
+                                            "СНЯТЫ" -> Color(0xFFD32F2F)
+                                            "<17 !!!", "<14 !!!" -> Color(0xFFF57C00)
+                                            else -> Color(0xFF00A86B)
+                                        }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (team.memberNames.isNotBlank()) {
+                                    Text(
+                                        team.memberNames,
+                                        fontSize = 13.sp,
+                                        color = Color.Gray,
+                                        maxLines = 1
+                                    )
+                                }
                                 Text(
-                                    "№${team.number} (${team.className}-й кл)",
-                                    modifier = Modifier.weight(1f)
-                                )
-                                // Цветовая метка (строка из TeamListInfo, не вызов VM)
-                                Text(
-                                    team.colorMark,
-                                    fontSize = 14.sp,
-                                    color = when (team.colorMark) {
-                                        "СНЯТЫ" -> Color(0xFFD32F2F)
-                                        "<17 !!!", "<14 !!!" -> Color(0xFFF57C00)
-                                        else -> Color(0xFF00A86B)
-                                    }
+                                    team.timeInfo,
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
                                 )
                             }
                         }
@@ -837,6 +1821,7 @@ data class TeamListInfo(
     val className: String,
     val status: String,
     val colorMark: String = "",
+    val memberNames: String = "",
     val timeInfo: String = ""
 )
 
@@ -868,43 +1853,36 @@ class TeamListVM @Inject constructor(
                 .collect { teams ->
                     val result = teams.map { team ->
                         val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                        val memberNames = participants.mapNotNull { p ->
-                            val person = personRepo.getPersonById(p.personId)
-                            person?.lastName
-                        }.joinToString(", ")
+                        val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
 
-                        val hasMinor = run {
-                            val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
-                            persons.any { person ->
-                                person.birthDate?.let { birth ->
-                                    try {
-                                        val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                        val bd = sdf.parse(birth)
-                                        val today = java.util.Calendar.getInstance()
-                                        val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                        var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                        if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                        age in 14..17
-                                    } catch (e: Exception) { false }
-                                } ?: false
-                            }
+                        val memberNames = persons.joinToString(", ") { "${it.lastName} ${it.firstName.take(1)}." }
+
+                        val hasMinor = persons.any { person ->
+                            person.birthDate?.let { birth ->
+                                try {
+                                    val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                                    val bd = sdf.parse(birth)
+                                    val today = java.util.Calendar.getInstance()
+                                    val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                    var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
+                                    if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                                    age in 14..17
+                                } catch (e: Exception) { false }
+                            } ?: false
                         }
 
-                        val hasChild = run {
-                            val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
-                            persons.any { person ->
-                                person.birthDate?.let { birth ->
-                                    try {
-                                        val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                        val bd = sdf.parse(birth)
-                                        val today = java.util.Calendar.getInstance()
-                                        val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                        var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                        if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                        age < 14
-                                    } catch (e: Exception) { false }
-                                } ?: false
-                            }
+                        val hasChild = persons.any { person ->
+                            person.birthDate?.let { birth ->
+                                try {
+                                    val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                                    val bd = sdf.parse(birth)
+                                    val today = java.util.Calendar.getInstance()
+                                    val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                    var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
+                                    if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                                    age < 14
+                                } catch (e: Exception) { false }
+                            } ?: false
                         }
 
                         val colorMark = when {
@@ -921,6 +1899,7 @@ class TeamListVM @Inject constructor(
                             className = team.className,
                             status = team.status,
                             colorMark = colorMark,
+                            memberNames = memberNames,
                             timeInfo = when (team.status) {
                                 "started" -> "В пути"
                                 "finished" -> "Финиш"
@@ -1153,16 +2132,18 @@ app/src/main/java/com/speleo/start/util/DateValidator.kt>>>
 package com.speleo.start.util
 
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
 
 object DateValidator {
 
+    private val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+
     fun isValid(date: String): Boolean {
         if (date.length != 10) return false
         return try {
-            val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-            sdf.isLenient = false
-            sdf.parse(date)
+            dateFormat.isLenient = false
+            dateFormat.parse(date)
             true
         } catch (e: Exception) {
             false
@@ -1177,6 +2158,82 @@ object DateValidator {
             sb.append(digits[i])
         }
         return sb.toString()
+    }
+
+    fun isRealDate(date: String): Boolean {
+        if (date.length != 10) return false
+
+        return try {
+            val parts = date.split(".")
+            if (parts.size != 3) return false
+
+            val day = parts[0].toIntOrNull() ?: return false
+            val month = parts[1].toIntOrNull() ?: return false
+            val year = parts[2].toIntOrNull() ?: return false
+
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            if (year < 1900 || year > currentYear) return false
+
+            if (month !in 1..12) return false
+
+            val maxDay = when (month) {
+                1, 3, 5, 7, 8, 10, 12 -> 31
+                4, 6, 9, 11 -> 30
+                2 -> {
+                    val isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+                    if (isLeap) 29 else 28
+                }
+                else -> return false
+            }
+            day in 1..maxDay
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun calculateAge(birthDateString: String?): Int? {
+        if (birthDateString.isNullOrBlank()) return null
+        if (birthDateString.length != 10) return null
+
+        return try {
+            dateFormat.isLenient = false
+            val birthDate = dateFormat.parse(birthDateString) ?: return null
+
+            val today = Calendar.getInstance()
+            val birthCal = Calendar.getInstance().apply { time = birthDate }
+
+            var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
+            if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) {
+                age--
+            }
+            if (age < 0) return null
+            age
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun canBeMentor(birthDateString: String?): Boolean {
+        val age = calculateAge(birthDateString) ?: return false
+        return age >= 18
+    }
+
+    fun getAgeColorMark(birthDateString: String?): AgeMark {
+        val age = calculateAge(birthDateString) ?: return AgeMark.UNKNOWN
+        return when {
+            age < 14 -> AgeMark.UNDER_14
+            age in 14..17 -> AgeMark.MINOR
+            age in 18..70 -> AgeMark.ADULT
+            else -> AgeMark.SENIOR
+        }
+    }
+
+    enum class AgeMark(val label: String, val colorHex: String) {
+        UNDER_14("<14", "#FFC107"),
+        MINOR("14+", "#FFC107"),
+        ADULT("18+", "#00A86B"),
+        SENIOR("70+", "#FF8C00"),
+        UNKNOWN("?", "#9E9E9E")
     }
 }
 <<<конец файла
@@ -1209,16 +2266,12 @@ object PhoneFormatter {
 app/src/main/java/com/speleo/start/util/StringExt.kt>>>
 package com.speleo.start.util
 
-import java.util.Locale // ← добавь этот импорт
+import java.util.Locale
 
 object StringExt {
-    /**
-     * Первая буква заглавная, остальные строчные.
-     * "иванов" → "Иванов", "ИВАНОВ" → "Иванов"
-     */
     fun String.toTitleCase(): String {
         if (isEmpty()) return this
-        return this[0].uppercase(Locale.ROOT) + substring(1).lowercase(Locale.ROOT)
+        return this[0].uppercase(Locale.getDefault()) + substring(1).lowercase(Locale.getDefault())
     }
 }
 <<<конец файла
@@ -1596,885 +2649,5 @@ com.speleo.start/
 3. Всегда проверять insert() != -1L
 4. Не хардкодить ID. Использовать SharedState или navArgument
 5. Тёмная тема: не использовать захардкоженные Color(). Только MaterialTheme или проверка обеих тем
-<<<конец файла
-
-docs/Logic_Processes.md>>>
-# ЛОГИКА ПРОЦЕССОВ · СпелеоСтарт
-
----
-
-## 1. РЕГИСТРАЦИЯ КОМАНДЫ
-
-```text
-НАЧАЛО
-│
-▼
-Ввод фамилии (3+ символов)
-│
-├──[источник "База персон"]──▶ Поиск в persons
-│   ├──[найдено]──▶ Выпадающий список → выбор → автозаполнение
-│   └──[не найдено]──▶ Ручной ввод
-│
-└──[источник "Словарь"]──▶ Поиск в names_dictionary.json
-    ├──[найдено]──▶ Список фамилий → выбор → автоподстановка имени
-    └──[не найдено]──▶ Ручной ввод
-```
-
-### Проверка возраста и ментора
-```text
-Введена дата рождения
-│
-▼
-Расчёт возраста
-│
-├──[≥18]──▶ ✅ Ментор не требуется
-├──[14-17]──▶ ⚠️ Требуется ментор (подтверждение)
-├──[<14]──▶ ⚠️ Ментор + разрешение судьи
-└──[некорректна]──▶ ❌ Ошибка
-```
-
-### Сохранение
-```text
-Нажата "СОХРАНИТЬ"
-│
-▼
-Проверки:
-├──[командный]──▶ мин. 2 участника
-├──[личный]─────▶ мин. 1 участник
-├──[ФИО заполнены?]
-└──[обязательные поля?]
-│
-▼
-✅ Создание: номер (сквозной в классе), статус registered, цветовая метка
-```
-
----
-## 2. СТАРТ
-
-### Формирование очереди
-```text
-Получить все registered команды
-│
-▼
-Разделить по классам: class2_list, class3_list
-│
-▼
-Сортировать по team_number
-│
-▼
-Чередование: 2 → 3 → 2 → 3 ...
-```
-
-### Старт команды
-```text
-Нажата "СТАРТ" или обратный отсчёт = 0
-│
-▼
-Проверки:
-├──[команда существует?]
-├──[статус = registered?]
-├──[мин. участников?]
-└──[менторы для <18?]
-│
-▼
-✅ Статус → started
-start_time = System.currentTimeMillis()
-Удалить из очереди
-countdown = start_interval
-```
-
-### Пропуск
-```text
-Нажата "ПРОПУСК"
-│
-├──[первая команда?]──▶ ❌ Нельзя
-└──[команда существует?]
-│
-▼
-✅ skip_count++
-Перенести в конец очереди своего класса
-countdown = start_interval
-```
-
-### Откат старта
-```textДолгий тап → "Откат старта"
-│
-├──[единственная started?]──▶ Сброс таймера, статус → registered, кнопка "НАЧАТЬ"
-└──[есть другие started?]──▶ Статус → registered, возврат в конец очереди
-```
-
----
-
-## 3. ФИНИШ
-```text
-Открыт диалог финиша (FAB 🏁)
-│
-▼
-finishTimestamp = System.currentTimeMillis()  ← ФИКСАЦИЯ СРАЗУ
-│
-▼
-Показать все started команды (2 колонки)
-│
-▼
-Выбор команд → "ПОДТВЕРДИТЬ"
-│
-▼
-Для каждой выбранной:
-finishTimestamp = зафиксированное время
-Статус → finished
-```
-
-### Ручная корректировка
-```text
-Долгий тап по времени
-│
-▼
-Диалог: часы, минуты, секунды
-│
-▼
-Лог: "Время скорректировано. Судья: [ФИО]. Исходное: X, Новое: Y"
-```
-
----
-
-## 4. ПУТЕВОЙ ЛИСТ
-
-### Заполнение КП
-```text
-Для каждого КП:
-│
-├──[обычный]──▶ Чекбоксы "Взят" / "Ошибка"
-│   ├──[☑️ Взят, ☐ Ошибка]──▶ Вес засчитывается
-│   ├──[☑️ Взят, ☑️ Ошибка]──▶ Вес НЕ засчитывается
-│   └──[☐ Взят]─────────────▶ Вес НЕ засчитывается│
-└──[технический]──▶ Дополнительно: Отсечка (ММ:СС), Штраф (баллы)
-```
-
-### Подтверждение
-```text
-Секретарь заполнил → пароль → "☑️ Карту заполнил"
-Судья проверил → пароль → "☑️ Карту проверил"
-│
-▼
-Оба отмечены → checkpointsEntered = true → read-only
-```
-
-### Пересчёт lost → finished
-```text
-После сохранения ПЛ:
-│
-▼
-чистое_время = (финиш - старт) - Σ(отсечка)
-│
-▼
-Если статус = lost И чистое_время ≤ КВ:
-│
-▼
-✅ Статус → finished
-Лог: "Статус изменён с lost на finished после учёта ожидания"
-```
-
----
-
-## 5. ИТОГИ
-
-### Расчёт баллов
-`Σ(баллы) = Σ(вес_КП, где taken=1 И error=0) - Σ(штрафы)`
-
-### Ранжирование
-```text
-Сортировка:
-Статус: finished > lost > disqualified
-Баллы: больше → выше
-Чистое время: меньше → выше
-```
-
-### Деление мест
-```text
-Если баллы равны И разница времени ≤ допуск:
-│
-▼
-Предложить судье объединить
-│▼
-final_place = одинаковый
-place_merged = true
-```
-
----
-
-## 6. РАСФОРМИРОВАНИЕ
-```text
-Долгий тап → "Расформировать"
-│
-├──[registered]──▶ Без пароля → участники → free_agent
-├──[started]─────▶ Пароль + причина → возврат в registered → free_agent
-└──[finished/lost/disqualified]──▶ ❌ Запрещено
-```
-
----
-
-## 7. СМЕНА КЛАССА
-```text
-│
-├──[registered]──▶ Можно. Если в очереди → выбор: оставить/в конец/удалить
-├──[started ≤5 мин]──▶ Пароль + штраф (настраивается)
-├──[started >5 мин]──▶ ❌ Только откат или дисквалификация
-└──[finished]────────▶ ❌ Только дисквалификация
-```
-
----
-
-## 8. ПЕРЕХОДЫ СТАТУСОВ КОМАНДЫ
-```text
-┌─────────────┐     СТАРТ      ┌─────────┐    ФИНИШ     ┌──────────┐
-│ registered  │───────────────▶│ started │─────────────▶│ finished │
-└──────┬──────┘                └────┬────┘              └────┬─────┘
-       │                            │                         │
-       │ ДИСКВАЛИФИКАЦИЯ             │ ДИСКВАЛИФИКАЦИЯ          │ ДИСКВАЛИФИКАЦИЯ
-       ▼                            ▼                         ▼
-┌─────────────┐                ┌─────────────┐           ┌─────────────┐
-│disqualified │                │disqualified │           │disqualified │
-└─────────────┘                └─────────────┘           └─────────────┘
-       │
-       │ ПРОСРОЧКА КВ
-       ▼
-┌─────────┐
-│  lost   │
-└────┬────┘
-     │ УЧЁТ ОЖИДАНИЯ (чистое_время ≤ КВ)
-     ▼
-┌──────────┐
-│ finished │└──────────┘
-```
-
----
-
-## 9. ПРОВЕРКИ И ОГРАНИЧЕНИЯ (СВОДКА)
-
-| Действие | Условие | Результат |
-|----------|---------|-----------|
-| Старт | ≥ мин. участников | ❌ «Недостаточно участников» |
-| Старт | Все участники active | ❌ «Есть неактивные» |
-| Пропуск | Не первая команда | ❌ «Нельзя пропустить первую» |
-| Расформирование | registered или started | ❌ «Нельзя расформировать» |
-| Финиш | Статус started | ❌ «Не на дистанции» |
-| Подтверждение ПЛ | Не взаимоисключающие | ❌ «Нельзя отметить оба» |
-| Финализация | Все finished имеют ПЛ | ❌ «Есть незавершённые» |
-| Сброс таймера | Нет started команд | ❌ «Есть команды на дистанции» |
-<<<конец файла
-
-docs/README.md>>>
-# СпелеоСтарт (SpeleoStart)
-
-Приложение для судейства соревнований по подземному ориентированию.
-Работает полностью офлайн в пещерах и каменоломнях.
-
-## Быстрый старт
-
-1. Установите APK на планшет/телефон (Android 7.0+)
-2. Запустите приложение
-3. Создайте соревнование (**Соревнования** → **➕ Новое**)
-4. Добавьте персон (**Персоны** → **➕ Новая**)
-5. Зарегистрируйте команды (**Регистрация**)
-6. Начинайте старты (**Старт** → **НАЧАТЬ СОРЕВНОВАНИЯ**)
-
-## Основные функции
-
-- Регистрация команд и участников (личный/командный зачёт)
-- Автоматическое чередование классов на старте (`2→3→2→3`)
-- Таймер с восстановлением после краша/перезагрузки
-- Фиксация финиша с ручной корректировкой времени
-- Электронные путевые листы (ПЛ) с двойным подтверждением
-- Автоматический подсчёт баллов и итогов
-- Экспорт протоколов (JSON/CSV) и генерация грамот (PDF)
-- Поддержка произвольного состава команды (ОБГ)
-
-## Технический стек
-
-- **Kotlin** 1.9.22 + **Jetpack Compose** (BOM 2024.02.00)
-- **Room** 2.6.1 (SQLite)
-- **Hilt** 2.48 (DI)
-- **Navigation Compose** 2.7.7
-- **Coroutines + Flow** (асинхронность)
-- **Timber** 5.0.1, **Security Crypto** 1.1.0
-
-## Структура проекта
-
-```text
-app/src/main/java/com/speleo/start/
-├── data/
-│   ├── local/
-│   │   ├── dao/        # Интерфейсы доступа к БД
-│   │   └── entity/     # Таблицы БД
-│   └── repository/     # Репозитории
-├── di/                 # Модули Hilt
-├── domain/
-│   └── usecase/        # Бизнес-логика
-├── presentation/
-│   └── screen/         # Экраны (Compose)
-└── util/               # Утилиты (даты, телефоны, таймеры)
-```
-
-## Разработка
-
-### Отладка (Debug-режим)
-- Долгий тап по плитке **«Настройки»** → меню разработчика
-- **«Заполнить тестовыми»** — создаёт соревнование, 20 персон, 10 команд
-- **«Очистить тестовые»** — удаляет все данные (соблюдая порядок `дети → родители`)
-- Таймер в debug-режиме работает ускоренно (`2 сек = 1 сек реального времени`)
-
-### Пароли по умолчанию (Debug)
-| Роль | Пароль |
-|------|--------|
-| Мастер | `devdebug` |
-| Судья | `judge123` |
-| Секретарь | `secret123` |
-| Администратор | `1234` |
-
-## Важные правила разработки
-
-1. При изменении `Entity` **ВСЕГДА** повышайте `version` в `AppDatabase`.
-2. Порядок очистки БД: дочерние таблицы → родительские (`participants` перед `teams`).
-3. Не хардкодить `competitionId`/`teamId` — используйте `SharedState`/ViewModel.
-4. Всегда проверяйте результат `insert()` на `-1L`.
-
-## Лицензия
-Проприетарная. Все права защищены.
-
-## Контакты
-- **Разработка:** команда SpeleoStart
-- **Документация:** `TZ_v4_Full.md`, `Logic_Processes.md`, `TZ_Corrections.md`
-<<<конец файла
-
-docs/SPEC_MASTER.md>>>
-# 📘 SPEC_MASTER.md · SpeleoStart v4.1 (Single Source of Truth)
-**Дата:** 26.04.2026 | **Статус:** Рабочая версия | **Язык:** RU
-
-## 1. ГЛОССАРИЙ (ОПЕРАЦИОННЫЙ)
-| Термин | Значение |
-|--------|----------|
-| `Competition` | Мероприятие. Цикл: `СОЗДАНО → АКТИВНО → ЗАВЕРШЕНО → АРХИВ → УДАЛЕНО` |
-| `Team` | Команда. Статусы: `registered → started → finished / lost / disqualified` |
-| `Checkpoint (КП)` | Точка. Типы: `normal` (вес), `technical` (вес + отсечка + штраф) |
-| `Master Route Card` | Эталонный набор КП соревнования |
-| `Team Route Card (ПЛ)` | Фактические отметки команды. Двойное подтверждение: Секретарь → Судья |
-| `КВ` | Контрольное время. 2 кл = 90 мин, 3 кл = 60 мин |
-| `Ментор` | Лицо ≥18 лет. Подтверждает ответственность за участника <18 |
-| `ПСР` | Статус `lost`. Требует флага `psrResolved` для закрытия |
-
-## 2. ЦВЕТОВЫЕ МЕТКИ КОМАНД
-| Метка | Условие | Цвет |
-|-------|---------|------|
-| `18+` | Все ≥18 | `#00A86B` |
-| `14+` | Есть 14-17, `mentorConfirmed = true` | `#FFC107` |
-| `<14ок` | Есть <14, ментор + `judgeApproved = true` | `#FFC107` |
-| `<17 !!!` | Есть 14-17, ментор НЕ подтверждён | `#FF8C00` |
-| `<14 !!!` | Есть <14, НЕТ разрешения судьи | `#FF8C00` |
-| `СНЯТЫ` | `disqualified` | `#D32F2F` |
-
-## 3. КЛЮЧЕВЫЕ ПРОЦЕССЫ
-### 3.1 Старт
-- Очередь чередуется: `2 → 3 → 2 → 3`. Если класс пуст → оставшиеся подряд.
-- Первый старт: обратный отсчёт 10 сек. Далее: `start_interval` из настроек.
-- `finishTimestamp` фиксируется **при открытии диалога финиша**, не при подтверждении.
-- Время главного таймера: `System.currentTimeMillis() - startTimestamp`. Восстанавливается из `app_settings`.
-
-### 3.2 Финиш
-- Групповой финиш разрешён. Всем выбранным командам присваивается одинаковый `finishTimestamp`.
-- Правка времени: долгий тап → диалог `ЧЧ:ММ:СС` → запись в лог: `"Время скорректировано. Судья: [ФИО]. Исходное: X, Новое: Y"`.
-
-### 3.3 Путевой лист
-- `Взят + Ошибка` → вес = 0, отсечка учитывается.
-- `Не взят` → вес = 0, отсечка не учитывается.
-- `Чистое время = (финиш - старт) - Σ(отсечка)`. Если `≤ КВ` и статус `lost` → автоперевод в `finished`.
-- После подтверждения Секретарем + Судьёй → `checkpointsEntered = true` → **read-only**.
-
-### 3.4 Итоги
-- Сортировка: `Статус (finished>lost>disq) → Баллы (↑) → Чистое время (↓)`.
-- Объединение мест: если баллы равны и разница времени `≤ tolerance` (по умолч. 2 сек) → судья подтверждает `place_merged = true`.
-
-## 4. ТЕХНИЧЕСКИЕ ОГРАНИЧЕНИЯ
-- **БД:** Room 2.6+, версия `5`. `version++` при любом изменении `Entity`.
-- **ID:** Никогда не хардкодить `competitionId` / `teamId`. Передача через `SharedState`.
-- **Очистка БД:** Порядок `дети → родители`. `clearAll()` в `TestDataGenerator` обёрнут в `db.withTransaction`.
-- **Безопасность:** Пароли SHA-256 + соль. Debug-режим: `devdebug`, `judge123`, `secret123`, `1234`.
-- **UI:** Тёмная тема адаптивная. Хардкод цветов запрещён (`MaterialTheme.colorScheme` или проверка на обе темы). Мин. тап 48dp.
-
-## 5. NEVER-DO (КРАТКО)
-1. Не повышать версию БД при изменении Entity → **КРАШ**.
-2. Хардкодить ID → **НЕСОГЛАСОВАННОСТЬ**.
-3. Вызывать генератор тестовых данных при старте → **ДУБЛИКАТЫ**.
-4. Удалять родителей до детей → **FOREIGN KEY**.
-5. Растягивать правки одного файла на итерации → **КОНФЛИКТЫ**.
-<<<конец файла
-
-docs/TZ_Corrections.md>>>
-# ИСТОРИЯ ПРАВОК И КОРРЕКТИРОВОК ТЗ
-*с пояснениями «почему именно так»*
-
-1. **Добавлено поле `shortName` в `CompetitionEntity`**
-   - **Дата:** 24.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** Полное название «Бяковские каменоломни 2026» слишком длинное для статус-бара (48dp высоты). Экономия места на экране. В протоколах используется полное `name`.
-   - **Файлы:** `CompetitionEntity.kt`, `CompetitionNewScreen.kt`, `CompetitionNewVM.kt`
-
-2. **Добавлено поле `nickname` (позывной) в `PersonEntity`**
-   - **Дата:** 24.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** В спелеосообществе принято использовать позывные. Полезно для быстрой идентификации.
-   - **Файлы:** `PersonEntity.kt`, `PersonNewScreen.kt`
-
-3. **Цветовые метки команд заменены с эмодзи 🟢🟠🔴 на текст**
-   - **Дата:** 24.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** Эмодзи по-разному отображаются на разных устройствах. Текст читается однозначно.
-   - **Было:** `🟢 Зелёная метка`
-   - **Стало:** `18+`, `14+`, `<14ок`, `<17 !!!`, `<14 !!!`, `СНЯТЫ`
-
-4. **Метка «ДИСКВ» заменена на «СНЯТЫ»**
-   - **Дата:** 24.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** «СНЯТЫ» — более понятный русский термин, чем сокращение «ДИСКВ».
-
-5. **«⚠️ Разрешено судьёй» — цвет изменён с красного на тёмно-зелёный**
-   - **Дата:** 24.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** Красный цвет ассоциируется с ошибкой. Разрешение — это наоборот «всё в порядке». Тёмно-зелёный `#2E7D32`.
-
-6. **Аватары: свои SVG вместо эмодзи 👤👦👧**
-   - **Дата:** 24.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** Эмодзи выглядят по-разному на Android и iOS. SVG гарантирует единый стиль.
-   - **Файлы:** `ic_avatar_male.svg` (голубой), `ic_avatar_female.svg` (розовый), `ic_avatar_default.svg` (серый)
-
-7. **Таймер: формат `ММ:СС.сс`, часы мельче если `00`**
-   - **Дата:** 25.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** Экономия места, пока соревнование не перевалило за час. Сотые важны для финиша.
-
-8. **Время финиша фиксируется при открытии диалога, а не при подтверждении**
-   - **Дата:** 23.04.2026
-   - **Инициатор:** Разработчик (ты) + обсуждение
-   - **Причина:** Пока судья выбирает команды в списке, время не должно «тикать». Это справедливо для группового финиша.
-
-9. **Отсечка вычитается из времени, даже если КП «взят с ошибкой»**
-   - **Дата:** 22.04.2026
-   - **Инициатор:** Разработчик (ты)
-   - **Причина:** Команда всё равно ждала в очереди и потратила время. Справедливо.
-
-10. **Смена класса разрешена первые 5 минут после старта со штрафом**
-    - **Дата:** 22.04.2026
-    - **Инициатор:** Разработчик (ты)
-    - **Причина:** Реальный кейс: команда поняла, что ошиблись классом, но ещё не ушла далеко. Штраф настраивается в настройках.
-
-11. **Кнопка «Экспорт сейчас» на главном экране**
-    - **Дата:** 24.04.2026
-    - **Инициатор:** Разработчик (ты)
-    - **Причина:** Страх судей потерять данные. Быстрый доступ без перехода в настройки.
-
-12. **Автоэкспорт в фоне при каждом изменении**
-    - **Дата:** 24.04.2026
-    - **Инициатор:** Обсуждение
-    - **Причина:** Если приложение крашнется — данные не потеряются. Файл `autobackup.json` ~300 КБ.
-
-13. **Импорт в «голое» приложение**
-    - **Дата:** 24.04.2026
-    - **Инициатор:** Разработчик (ты)
-    - **Причина:** Сценарий: телефон сломался, флешка → новый телефон → восстановление.
-
-14. **Таймер восстанавливается через БД, а не SharedPreferences**
-    - **Дата:** 25.04.2026
-    - **Инициатор:** Обсуждение (вариант Б)
-    - **Причина:** SharedPreferences может сброситься при очистке кэша. БД надёжнее.
-
-15. **Порядок очистки БД: дети → родители**
-    - **Дата:** 25.04.2026
-    - **Инициатор:** Сторонний наблюдатель
-    - **Причина:** `FOREIGN KEY constraint` при удалении родительской таблицы раньше дочерней.
-
-16. **Генератор тестовых данных обёрнут в `db.withTransaction`**
-    - **Дата:** 25.04.2026
-    - **Инициатор:** Сторонний наблюдатель
-    - **Причина:** Атомарность: если генерация упадёт на середине — не останется «мусора» в БД.
-
-17. **Версия БД повышается при ЛЮБОМ изменении Entity**
-    - **Дата:** 25.04.2026 (выстрадано)
-    - **Инициатор:** 4-часовой баг `FOREIGN KEY`
-    - **Причина:** Старые данные + новая схема = крах. Всегда `version++`.
-<<<конец файла
-
-docs/TZ_v4_Full.md>>>
-# ТЕХНИЧЕСКОЕ ЗАДАНИЕ v4.1
-## Подземное ориентирование · СпелеоСтарт
-
----
-
-## РАЗДЕЛ 1: ГЛОССАРИЙ (18 терминов)
-
-### 1.1. Соревнование (Competition)
-Отдельное мероприятие по спортивному ориентированию.
-
-**Свойства:**
-- `name` — полное название (для протоколов)
-- `shortName` — краткое название (для статус-бара)
-- `date`, `place`, `discipline`, `system`, `settingsJson`
-- Жизненный цикл: СОЗДАНО → АКТИВНО → ЗАВЕРШЕНО → АРХИВИРОВАНО → УДАЛЕНО (и ОТМЕНЕНО)
-
-### 1.2. Персона (Person)
-Физическое лицо в общей базе. ФИО, дата рождения, пол, телефон, email, заметка, чёрная метка, никнейм, `canBeMentor`.
-
-### 1.3. Участник (Participant)
-Роль персоны в команде. Статусы: `active`, `replaced`, `free_agent`. Роли: `captain`, `member`.
-
-### 1.4. Свободный агент (Free Agent)
-Участник без активной команды. Может быть добавлен в другую.
-
-### 1.5. Команда (Team)
-Группа участников (от 2). Статусы: `registered`, `started`, `finished`, `disqualified`, `lost`.
-Цветовые метки: `18+`, `14+`, `<14ок`, `<17 !!!`, `<14 !!!`, `СНЯТЫ`.
-
-### 1.6. Класс сложности (Class)
-2-й класс (КВ 90 мин), 3-й класс (КВ 60 мин). Разные наборы КП.
-
-### 1.7. КП (Checkpoint)
-Точка на дистанции. Номер, вес, тип (обычный/технический), норматив, бонус.
-
-### 1.8. Эталонный маршрутный лист (Master Route Card)
-Конфигурация всех КП из настроек.
-
-### 1.9. Путевой лист (Team Route Card)
-Фактические отметки команды по КП. Подтверждается секретарём и судьёй.
-
-### 1.10. Старт (Start)
-Момент начала движения. Интервал из настроек, чередование 2→3→2→3, первая команда 10 сек.
-
-### 1.11. Финиш (Finish)
-Время финиша = момент открытия диалога. Множественный финиш. Ручная корректировка.
-
-### 1.12. Главный таймер (Main Timer)
-`ММ:СС.сс`, от первого старта. Не останавливается. Восстанавливается после краша через `app_settings`.
-### 1.13. Обратный отсчёт (Countdown Timer)
-До старта текущей команды. Звук 800/1000 Гц.
-
-### 1.14. КВ (Control Time)
-90 мин (2-й класс), 60 мин (3-й класс). Просрочка → `lost`.
-
-### 1.15. ПСР (Search & Rescue)
-Статус `lost`, флаг `psrResolved`.
-
-### 1.16. Откат старта (Rollback)
-Возврат в `registered`. Если единственная на дистанции → сброс таймера.
-
-### 1.17. Настройки соревнования (Competition Settings)
-JSON с параметрами: интервал, КВ, КП, кастомные поля.
-
-### 1.18. Ментор (Mentor)
-Совершеннолетний (≥18), ответственный за участника <18. Может быть участником другой команды.
-
----
-
-## РАЗДЕЛ 2: СУЩНОСТИ И СВЯЗИ
-
-### Основные связи
-| Связь | Тип | Внешний ключ |
-|-------|-----|-------------|
-| COMPETITION → TEAM | 1:N | `team.competitionId` |
-| TEAM → PARTICIPANT | 1:N | `participant.teamId` |
-| PERSON → PARTICIPANT | 1:N | `participant.personId` |
-| PERSON → MENTOR | 1:1 | `mentor.personId` |
-| MENTOR → PARTICIPANT | 1:N | `participant.mentorId` |
-| COMPETITION → MASTER_ROUTE_CARD | 1:N | `master_route_card.competitionId` |
-| MASTER_ROUTE_CARD → TEAM_ROUTE_CARD | 1:N | `team_route_card.checkpointId` |
-
-### Правила целостности
-- **R1:** Не стартовать без мин. участников
-- **R2:** Одна персона не дважды в одной команде
-- **R3:** Персона активна только в одной команде соревнования
-- **R4:** Ментор ≥18 лет
-- **R5:** Не редактировать подтверждённый ПЛ
-
----
-
-## РАЗДЕЛ 3: БАЗА ДАННЫХ
-
-### Таблицы
-1. `competitions` — соревнования
-2. `persons` — персоны
-3. `teams` — команды
-4. `participants` — участники
-5. `mentors` — менторы6. `master_route_card` — эталонный МЛ
-7. `team_route_card` — путевые листы
-8. `app_settings` — настройки (key-value)
-
-### Индексы
-Созданы для всех внешних ключей и полей поиска.
-
-### Триггеры
-- `check_person_active_in_one_team` — R3
-- `check_mentor_age` — R4
-- `prevent_edit_confirmed_route_card` — R5
-
-### Версия БД: 5
-
----
-
-## РАЗДЕЛ 4: СОРЕВНОВАНИЯ
-
-### Жизненный цикл
-`СОЗДАНО → АКТИВНО → ЗАВЕРШЕНО → АРХИВИРОВАНО → УДАЛЕНО`  
-`↓`  
-`ОТМЕНЕНО`
-
-### Создание (мастер)
-1. Основное: `name`, `shortName`, `date`, `place`, `discipline`, `system`
-2. Параметры старта: интервал, КВ
-3. Классы: 2-й (90 мин), 3-й (60 мин)
-4. Возраст: мин. 14 лет, правило <14, формат даты
-5. КП: список с весами и типами
-6. Пользовательские поля
-
-### Финализация
-Требует: все ПЛ введены, все статусы финальные. Пароль судьи. Данные → `read-only`.
-
----
-
-## РАЗДЕЛ 5: УЧАСТНИКИ И ПЕРСОНЫ
-
-### Персона
-- ФИО (`lastName`, `firstName`, `middleName`)
-- `nickname` (позывной)
-- `birthDate`, `phone`, `email`, `gender`
-- `note` (заметка), `blacklisted` (чёрная метка)
-- `canBeMentor` (флаг «может быть ментором», ≥18 лет)
-
-### Участник
-- Статусы: `active`, `replaced`, `free_agent`
-- Роль: `captain`, `member`
-- `mentorId`, `mentorConfirmed`, `judgeApproved`
-### Ментор
-- ≥18 лет, может быть участником другой команды
-- Один ментор — много подопечных
-- Подтверждение ответственности
-
-### Автоподстановка
-- Поиск по 3+ символам фамилии или 4+ цифрам телефона
-- Источник: база персон или словарь имён
-
----
-
-## РАЗДЕЛ 6: КОМАНДЫ
-
-### Статусы
-`registered` → `started` → `finished`  
-Любой → `disqualified`  
-`started` → `lost` → (учёт ожидания) → `finished`
-
-### Цветовые метки
-- `18+` — все ≥18
-- `14+` — есть 14-17, ментор подтверждён
-- `<14ок` — есть <14, ментор + разрешение
-- `<17 !!!` — есть 14-17, ментор НЕ подтверждён
-- `<14 !!!` — есть <14, НЕТ разрешения
-- `СНЯТЫ` — `disqualified`
-
-### Нумерация
-Сквозная в рамках класса и соревнования.
-
-### Расформирование
-- `registered` → без пароля, участники → `free_agent`
-- `started` → с паролем + причина + возврат в `registered`
-- `finished/lost/disqualified` → запрещено
-
----
-
-## РАЗДЕЛ 7: СТАРТ
-
-### Очередь
-- Из `registered` команд
-- Чередование 2→3→2→3
-- Если класс пуст — подряд оставшиеся
-- Пустая очередь → отсчёт остановлен, ждёт
-
-### Таймеры
-- Главный: `System.currentTimeMillis() - startTimestamp`
-- Обратный: 10 сек (первая), интервал из настроек (остальные)
-- Восстановление через `app_settings`
-
-### Кнопки- НАЧАТЬ СОРЕВНОВАНИЯ → 10-сек отсчёт
-- СНЯТЬ, ПРОПУСК, СТАРТ
-- ПАУЗА/ПУСК
-
-### Drag-and-drop очереди
-Запрещён при ≤10 сек до старта.
-
----
-
-## РАЗДЕЛ 8: ФИНИШ
-
-### Фиксация времени
-- `finishTimestamp = System.currentTimeMillis()` при открытии диалога
-- Всем выбранным — одинаковое время
-- Ручная корректировка: долгий тап + лог
-
-### Отображение
-- Две колонки: 2-й / 3-й класс
-- Только `started` команды
-
----
-
-## РАЗДЕЛ 9: КП И КАРТОЧКА
-
-### Эталонный МЛ
-- Настраивается в настройках соревнования
-- Поля: `displayNumber`, `weight`, `type`, `sortOrder`, `normativeSeconds`, `class2/3`, `trackWait`, `trackExec`, `bonusPoints`
-
-### Путевой лист
-- Таблица: №, вес, тип, взят, ошибка, отсечка, штраф
-- Подтверждение: секретарь + судья
-- После двойного подтверждения → `read-only`
-
-### Отсечка
-- Время ожидания на тех. КП
-- Вычитается из чистого времени
-- `net_time = (finish - start) - Σ(offset_time)`
-
-### Пересчёт `lost` → `finished`
-Если чистое время ≤ КВ после учёта отсечек.
-
----
-
-## РАЗДЕЛ 10: ИТОГИ
-
-### Ранжирование
-1. Статус: `finished` > `lost` > `disqualified`
-2. Баллы: больше → выше
-3. Чистое время: меньше → выше
-### Призовые места
-Всегда 3 (🥇🥈🥉). Под каждым может быть несколько команд.
-
-### Деление мест
-Судья вручную, с допуском по времени.
-
-### Грамоты
-PDF/HTML, ментор опционально, факсимиле (PNG).
-
-### Текст для ведущего
-Шаблон с подстановками `{gold_teams_list}` и т.д.
-
----
-
-## РАЗДЕЛ 11: UI/UX
-
-### Цвета
-- `primary`: `#1E5A7A`
-- `success`: `#00A86B`
-- `warning`: `#FFC107`
-- `danger`: `#D32F2F`
-- `timer`: `#00C853` (контрастно-зелёный)
-
-### Типографика
-- Таймер: `Roboto Mono`, 40sp/24sp
-- Заголовки: `Roboto Bold`, 24sp
-- Основной: `Roboto Regular`, 16sp
-
-### Размеры
-- Кнопки: 56dp высота
-- Плитки: 90dp высота, `aspectRatio 0.85`
-- Статус-бар: 48dp
-
-### Тёмная тема
-Адаптивная, `primaryContainer` для инфоплитки.
-
----
-
-## РАЗДЕЛ 12: ТЕХНИЧЕСКИЙ СТЕК
-
-- Kotlin 1.9.22
-- AGP 8.2.2, Gradle 8.5
-- Compose BOM 2024.02.00
-- Room 2.6.1, Hilt 2.48
-- Navigation Compose 2.7.7
-- Timber 5.0.1
-- Security Crypto 1.1.0-alpha06
-
-### Архитектура
-MVVM + Clean Architecture:  `Entity` → `DAO` → `Repository` → `UseCase` → `ViewModel` → `Screen`
-
-### Таймер
-`TimerManager` (Singleton, Flow-based, без Service).  
-Хранение `startTimestamp` в `app_settings`.  
-Восстановление: `System.currentTimeMillis() - startTimestamp`.  
-Резерв: `MIN(start_timestamp)` из `teams`.
-<<<конец файла
-
-docs/USER_GUIDE.md>>>
-# 🏆 СпелеоСтарт: Инструкция судьи
-*Коротко. По шагам. Без технических терминов.*
-
-## 🔹 Быстрый старт (3 минуты)
-1. Откройте приложение → «Соревнования» → «➕ Новое»
-2. Введите название, дату, место → «СОЗДАТЬ»
-3. Добавьте участников через «Персоны» → «➕ Новая персона»
-
-## 🔹 Зарегистрировать команду
-1. Меню «Регистрация» → выберите класс
-2. Введите фамилию:
-   - ✅ Нашлось → выберите из списка
-   - ❌ Нет → заполните прямо здесь:
-     • Фамилия
-     • Имя
-     • Дата рождения (ДД.ММ.ГГГГ)
-     > 💡 Поля «Отчество», «Телефон», «Позывной» скрыты. Нажмите «▸», чтобы заполнить сейчас, или сделайте это позже в полной карточке.
-3. Если участнику <18 лет:
-   - Приложение запросит ментора (≥18)
-   - ✅ Нашлось → выберите
-   - ❌ Нет → «➕ Быстрый ментор»: введите только Фамилию и Имя
-   > 📌 Ментор привязывается к участнику. Если он уже в команде — просто выберите его.
-4. Нажмите «СОХРАНИТЬ КОМАНДУ»
-
-## 🔹 Начать старты
-1. Меню «Старт» → «НАЧАТЬ СОРЕВНОВАНИЯ»
-2. Очередь чередуется (2-й → 3-й класс) автоматически
-3. Команда уходит по сигналу. Следующая появится сама
-
-## 🔹 Зафиксировать финиш
-1. Нажмите 🏁 в нижнем углу
-2. Отметьте галочками финишировавшие команды
-3. Нажмите «ПОДТВЕРДИТЬ»
-> ⏱️ Время фиксируется в момент открытия окна. Если опоздали — долгий тап по времени → введите верно.
-
-## 🔹 Заполнить путевой лист
-1. Карточка команды → 📄 (или меню «Путевые»)
-2. Для каждого КП: отметьте «Взят» / «Ошибка»
-3. Для технических КП: укажите время ожидания
-4. Введите пароль секретаря → «Карту заполнил»
-5. Введите пароль судьи → «Карту проверил»
-> 📌 После двойного подтверждения правки закрыты.
-> ⚠️ Если в настройках отключено подтверждение: сохранение идёт сразу. Будьте внимательны.
-
-## 🔹 Посмотреть итоги
-1. Меню «Итоги» → выберите класс
-2. Таблица: место, номер, баллы, время
-3. Команды с пометкой `ОБГ` идут в конце списка. Их результаты считаются автоматически.
-
----
-
-## ❓ Частые вопросы
-| Вопрос | Ответ |
-|--------|-------|
-| Команда не стартовала вовремя | Нажмите «ПРОПУСК» → команда перейдёт в конец очереди |
-| Ошиблись при вводе времени финиша | Долгий тап по времени → введите верно → сохраните |
-| Участник выбыл | Карточка команды → «🔄 Заменить» |
-| Приложение закрылось само | Откройте снова — таймер и данные восстановятся |
-| Нужно экспортировать результаты | Главный экран → «📤 Экспорт сейчас» → файл в «Документы» |
-
-## 🚫 Что нельзя делать
-- Не удаляйте приложение до финализации соревнования
-- Не меняйте время на устройстве во время старта
-- Не подтверждайте путевой лист, пока не сверили отметки с бумажным носителем
-
-## 🆘 Экстренная помощь
-- Сброс таймера: долгий тап по таймеру → пароль `1234`
-- Восстановление: «📥 Импорт» → выберите `autobackup.json`
 <<<конец файла
 

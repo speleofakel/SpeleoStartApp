@@ -16,15 +16,17 @@ interface PersonDao {
 
     @Query("""
         SELECT * FROM persons 
-        WHERE lastName LIKE :query || '%' 
+        WHERE (REPLACE(REPLACE(lastName, 'Ё', 'Е'), 'ё', 'е') LIKE REPLACE(REPLACE(:query, 'Ё', 'Е'), 'ё', 'е') || '%')
         AND (:gender IS NULL OR gender = :gender)
         AND blacklisted = 0
         ORDER BY lastName, firstName 
         LIMIT 10
     """)
     fun searchPersons(query: String, gender: String?): Flow<List<PersonEntity>>
+
     @Query("DELETE FROM persons")
     suspend fun deleteAll()
+
     @Query("SELECT * FROM persons WHERE id = :id")
     suspend fun getPersonById(id: Long): PersonEntity?
 

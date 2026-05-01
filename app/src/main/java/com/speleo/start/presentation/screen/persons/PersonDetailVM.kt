@@ -50,8 +50,12 @@ class PersonDetailVM @Inject constructor(
                 return@launch
             }
 
-            // Валидация даты
-            if (!birthDate.isNullOrBlank() && birthDate.length == 10) {
+            // ЖЁСТКАЯ ВАЛИДАЦИЯ: блокируем сохранение некорректной даты
+            if (!birthDate.isNullOrBlank()) {
+                if (birthDate.length != 10) {
+                    _error.emit("Дата рождения неполная")
+                    return@launch
+                }
                 if (!DateValidator.isRealDate(birthDate)) {
                     _error.emit("Некорректная дата рождения: $birthDate")
                     return@launch

@@ -10,7 +10,6 @@ import javax.inject.Singleton
 class ParticipantRepository @Inject constructor(
     private val participantDao: ParticipantDao
 ) {
-
     fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
         participantDao.getActiveParticipantsByTeam(teamId)
 
@@ -22,6 +21,9 @@ class ParticipantRepository @Inject constructor(
 
     suspend fun getParticipantById(id: Long): ParticipantEntity? =
         participantDao.getParticipantById(id)
+
+    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity? =
+        participantDao.findActiveByPersonAndComp(personId, competitionId)
 
     suspend fun addParticipant(
         teamId: Long,
@@ -50,4 +52,11 @@ class ParticipantRepository @Inject constructor(
 
     suspend fun deleteParticipant(id: Long) =
         participantDao.delete(id)
+
+    suspend fun updateMentorAndFlags(
+        id: Long,
+        mentorId: Long?,
+        mentorConfirmed: Boolean,
+        judgeApproved: Boolean
+    ) = participantDao.updateMentorAndFlags(id, mentorId, mentorConfirmed, judgeApproved)
 }

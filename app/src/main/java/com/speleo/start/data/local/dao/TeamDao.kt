@@ -49,4 +49,6 @@ interface TeamDao {
 
     @Query("SELECT MAX(teamNumber) FROM teams WHERE competitionId = :competitionId AND className = :className")
     suspend fun getMaxTeamNumber(competitionId: Long, className: String): Int?
+
+
 }

@@ -10,6 +10,8 @@ import javax.inject.Singleton
 class TeamRepository @Inject constructor(
     private val teamDao: TeamDao
 ) {
+    suspend fun getMaxTeamNumber(competitionId: Long, className: String): Int? =
+        teamDao.getMaxTeamNumber(competitionId, className)
 
     fun getTeamsByCompetition(competitionId: Long): Flow<List<TeamEntity>> =
         teamDao.getTeamsByCompetition(competitionId)

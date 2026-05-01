@@ -41,7 +41,6 @@ fun TeamListScreen(
                 .padding(padding)
                 .padding(12.dp)
         ) {
-            // Поиск
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { vm.onSearchQueryChange(it) },
@@ -52,7 +51,6 @@ fun TeamListScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Пустой список
             if (teams.isEmpty()) {
                 Text("Нет команд", fontSize = 16.sp)
             } else {
@@ -67,24 +65,38 @@ fun TeamListScreen(
                                     onTeamClick(team.id)
                                 }
                         ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                // Номер и класс
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "№${team.number} (${team.className}-й кл)",
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                    Text(
+                                        team.colorMark,
+                                        fontSize = 14.sp,
+                                        color = when (team.colorMark) {
+                                            "СНЯТЫ" -> Color(0xFFD32F2F)
+                                            "<17 !!!", "<14 !!!" -> Color(0xFFF57C00)
+                                            else -> Color(0xFF00A86B)
+                                        }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (team.memberNames.isNotBlank()) {
+                                    Text(
+                                        team.memberNames,
+                                        fontSize = 13.sp,
+                                        color = Color.Gray,
+                                        maxLines = 1
+                                    )
+                                }
                                 Text(
-                                    "№${team.number} (${team.className}-й кл)",
-                                    modifier = Modifier.weight(1f)
-                                )
-                                // Цветовая метка (строка из TeamListInfo, не вызов VM)
-                                Text(
-                                    team.colorMark,
-                                    fontSize = 14.sp,
-                                    color = when (team.colorMark) {
-                                        "СНЯТЫ" -> Color(0xFFD32F2F)
-                                        "<17 !!!", "<14 !!!" -> Color(0xFFF57C00)
-                                        else -> Color(0xFF00A86B)
-                                    }
+                                    team.timeInfo,
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
                                 )
                             }
                         }

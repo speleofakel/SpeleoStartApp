@@ -78,8 +78,8 @@ fun PersonDetailScreen(
         }
     }
 
-    // Проверка частичной даты
-    fun isPartialDateInvalid(date: String): Boolean {
+    // Проверка частичной даты — подсвечивает красным при ЛЮБОЙ ошибке
+    fun isDateError(date: String): Boolean {
         if (date.isBlank()) return false
         if (date.length < 10) {
             val parts = date.split(".")
@@ -94,14 +94,13 @@ fun PersonDetailScreen(
         return !DateValidator.isRealDate(date)
     }
 
-    val isDateValid = birthDate.isBlank() ||
-            (birthDate.length == 10 && DateValidator.isRealDate(birthDate))
+    val dateHasError = isDateError(birthDate)
 
-    val isDateError = birthDate.isNotBlank() && isPartialDateInvalid(birthDate)
-
+    // Форма валидна только если дата либо пустая, либо полностью корректная
     val isFormValid = lastName.isNotBlank() &&
             firstName.isNotBlank() &&
-            isDateValid
+            !dateHasError &&
+            (birthDate.isBlank() || (birthDate.length == 10 && DateValidator.isRealDate(birthDate)))
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -368,7 +367,7 @@ fun PersonDetailScreen(
                         }
                     }
 
-                    val dateLabel = if (isDateError) {
+                    val dateLabel = if (dateHasError) {
                         "Некорректная дата"
                     } else {
                         "Дата рождения"
@@ -402,20 +401,22 @@ fun PersonDetailScreen(
                                 birthDate = formatted
                             }
 
-                            if (formatted.length == 10 && DateValidator.isRealDate(formatted)) {
+                            // АВТОПЕРЕХОД: всегда при 10 символах, независимо от валидности
+                            if (formatted.length == 10) {
                                 focusManager.moveFocus(FocusDirection.Down)
                             }
                         },
                         label = { Text(dateLabel) },
-                        isError = isDateError,
+                        isError = dateHasError,
                         singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Done
+                            imeAction = ImeAction.Next
                         )
                     )
 
-                    if (isDateError) {
+                    if (dateHasError) {
                         Text(
                             "Некорректная дата",
                             color = Color(0xFFD32F2F),

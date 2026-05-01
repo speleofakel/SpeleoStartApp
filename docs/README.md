@@ -78,3 +78,15 @@ app/src/main/java/com/speleo/start/
 ## Контакты
 - **Разработка:** команда SpeleoStart
 - **Документация:** `TZ_v4_Full.md`, `Logic_Processes.md`, `TZ_Corrections.md`
+
+## [Невыпущенное] — 01.05.2026 18:23 МСК
+
+### 🐛 Исправлено
+- **TeamRegisterScreen: курсор даты рождения прыгает перед символом** — восстановлен пересчёт `digitsBeforeCursor + dotsBeforeCursor` после регрессии
+- **TeamRegisterScreen: ментор не прикрепляется / нет кнопки изменить** — `ageGroup` теперь обновляется при сохранении быстрой персоны (`calculateAgeGroup(it.birthDate)`)
+- **TeamRegisterScreen: кнопка «СОХРАНИТЬ КОМАНДУ» заблокирована после быстрого создания** — `AgeGroup.UNKNOWN` больше не остаётся в `MemberDraft` после `createQuickPerson`
+
+### 🛡️ Правила (добавлены в ARCHITECTURE.md / VALIDATION_RULES.md / SPEC_MASTER.md)
+- **Курсор автоформатирования:** запрещён `selection.start.coerceIn()` напрямую, обязателен пересчёт через значащие символы
+- **ageGroup при quick-create:** обязательно вычислять и сохранять в `MemberDraft` при `createQuickPerson()`, иначе `allRequirementsMet` возвращает `false` для `UNKNOWN`
+- **effectiveAgeGroup в MemberCard:** резервный расчёт на лету если `ageGroup == UNKNOWN` (защита от legacy-данных)
