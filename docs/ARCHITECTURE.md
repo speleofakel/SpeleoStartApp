@@ -52,8 +52,52 @@ com.speleo.start/
 ### 3.5 Форматирование ФИО
 
 - Поля всегда раздельные: Фамилия | Имя | Отчество
-- Автокап первой буквы (Title Case) применяется в util/StringExt перед сохранением
+- Автокап первой буквы (Title Case) применяется в `util/StringExt` перед сохранением
 - Работает в регистрации, инлайн-создании, быстром менторе
+
+**Реализация Title Case для русского языка:**
+
+```kotlin
+private val RUSSIAN_LOCALE = Locale("ru", "RU")
+
+fun String.toTitleCase(): String {
+    if (isEmpty()) return this
+    
+    val result = StringBuilder()
+    var capitalizeNext = true
+    
+    for (i in indices) {
+        val ch = this[i]
+        
+        when {
+            ch.isLetter() -> {
+                if (capitalizeNext) {
+                    result.append(ch.uppercase(RUSSIAN_LOCALE))
+                    capitalizeNext = false
+                } else {
+                    result.append(ch.lowercase(RUSSIAN_LOCALE))
+                }
+            }
+            ch == '-' -> {  // Дефисные фамилии (Салтыков-Щедрин)
+                result.append(ch)
+                capitalizeNext = true
+            }
+            ch == ' ' || ch == '.' -> {
+                result.append(ch)
+                capitalizeNext = true
+            }
+            else -> result.append(ch)
+        }
+    }
+    
+    return result.toString()
+}
+```
+**Ключевые особенности:**
+- Явный `Locale("ru", "RU")` вместо `Locale.getDefault()` — корректная обработка русского языка на любом устройстве
+- Поддержка дефисных фамилий (каждая часть с заглавной)
+- Инициалы (Иванов И.И.) не ломаются
+- `capitalizeNext` сбрасывается после пробелов, точек и дефисов
 
 ### 3.6 Стабильность курсора в полях автоформатирования
 

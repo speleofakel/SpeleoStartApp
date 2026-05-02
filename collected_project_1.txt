@@ -341,7 +341,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
@@ -356,6 +356,7 @@ import com.speleo.start.presentation.screen.competitions.CompetitionNewScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionSettingsScreen
 import com.speleo.start.presentation.screen.finish.FinishScreen
 import com.speleo.start.presentation.screen.home.HomeScreen
+import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 import com.speleo.start.presentation.screen.persons.PersonListScreen
 import com.speleo.start.presentation.screen.results.ResultsScreen
 import com.speleo.start.presentation.screen.routecard.RouteCardScreen
@@ -366,7 +367,6 @@ import com.speleo.start.presentation.screen.teamlist.TeamListScreen
 import com.speleo.start.ui.theme.SpeleoStartTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
-import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -552,10 +552,22 @@ package com.speleo.start.data
 import android.util.Log
 import androidx.room.withTransaction
 import com.speleo.start.data.local.AppDatabase
-import com.speleo.start.data.local.dao.*
-import com.speleo.start.data.local.entity.*
-import kotlinx.coroutines.*
-import java.util.*
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.entity.CompetitionEntity
+import com.speleo.start.data.local.entity.MasterRouteCardEntity
+import com.speleo.start.data.local.entity.MentorEntity
+import com.speleo.start.data.local.entity.ParticipantEntity
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.local.entity.TeamEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.Random
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -681,8 +693,24 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.speleo.start.data.local.dao.*
-import com.speleo.start.data.local.entity.*
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.dao.CheckpointDao
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.dao.TeamRouteCardDao
+import com.speleo.start.data.local.entity.AppSettingsEntity
+import com.speleo.start.data.local.entity.CheckpointEntity
+import com.speleo.start.data.local.entity.CompetitionEntity
+import com.speleo.start.data.local.entity.MasterRouteCardEntity
+import com.speleo.start.data.local.entity.MentorEntity
+import com.speleo.start.data.local.entity.ParticipantEntity
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.local.entity.TeamEntity
+import com.speleo.start.data.local.entity.TeamRouteCardEntity
 
 @Database(
     entities = [
@@ -884,7 +912,10 @@ interface CheckpointDao {
 app/src/main/java/com/speleo/start/data/local/dao/CompetitionDao.kt>>>
 package com.speleo.start.data.local.dao
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
 import com.speleo.start.data.local.entity.CompetitionEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -920,7 +951,10 @@ interface CompetitionDao {
 app/src/main/java/com/speleo/start/data/local/dao/MasterRouteCardDao.kt>>>
 package com.speleo.start.data.local.dao
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
 import com.speleo.start.data.local.entity.MasterRouteCardEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -1114,7 +1148,10 @@ interface PersonDao {
 app/src/main/java/com/speleo/start/data/local/dao/TeamDao.kt>>>
 package com.speleo.start.data.local.dao
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
 import com.speleo.start.data.local.entity.TeamEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -1259,8 +1296,8 @@ package com.speleo.start.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
-import androidx.room.PrimaryKey
 import androidx.room.Index
+import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "checkpoints",
@@ -1296,8 +1333,8 @@ package com.speleo.start.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
-import androidx.room.PrimaryKey
 import androidx.room.Index
+import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "master_route_card",
@@ -1309,7 +1346,7 @@ import androidx.room.Index
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["competitionId"])]  // ← добавить
+    indices = [Index(value = ["competitionId"])]
 )
 data class MasterRouteCardEntity(
     @PrimaryKey(autoGenerate = true)
@@ -1317,7 +1354,7 @@ data class MasterRouteCardEntity(
     val competitionId: Long,
     val displayNumber: Int,
     val weight: Int = 1,
-    val type: String = "normal",
+    val type: String = "normal",  // "normal" или "technical"
     val sortOrder: Int,
     val normativeSeconds: Int = 0,
     val forClass2: Boolean = true,
@@ -1333,8 +1370,8 @@ package com.speleo.start.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
-import androidx.room.PrimaryKey
 import androidx.room.Index
+import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "mentors",
@@ -1361,8 +1398,8 @@ package com.speleo.start.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
-import androidx.room.PrimaryKey
 import androidx.room.Index
+import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "participants",
@@ -1893,9 +1930,17 @@ package com.speleo.start.di
 
 import android.content.Context
 import androidx.room.Room
-import com.speleo.start.data.local.AppDatabase
-import com.speleo.start.data.local.dao.*
 import com.speleo.start.data.TestDataGenerator
+import com.speleo.start.data.local.AppDatabase
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.dao.CheckpointDao
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.dao.TeamRouteCardDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -1959,8 +2004,20 @@ object DatabaseModule {
 app/src/main/java/com/speleo/start/di/RepositoryModule.kt>>>
 package com.speleo.start.di
 
-import com.speleo.start.data.local.dao.*
-import com.speleo.start.data.repository.*
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.dao.MasterRouteCardDao
+import com.speleo.start.data.local.dao.MentorDao
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.dao.PersonDao
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.dao.TeamRouteCardDao
+import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.MasterRouteCardRepository
+import com.speleo.start.data.repository.MentorRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.data.repository.TeamRouteCardRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -2321,8 +2378,16 @@ package com.speleo.start.presentation
 
 import com.speleo.start.data.local.dao.AppSettingsDao
 import com.speleo.start.data.local.entity.AppSettingsEntity
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -2430,10 +2495,15 @@ class TimerManager @Inject constructor(
 app/src/main/java/com/speleo/start/presentation/TimerService.kt>>>
 package com.speleo.start.presentation
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -2492,10 +2562,20 @@ app/src/main/java/com/speleo/start/presentation/component/PersonBadge.kt>>>
 package com.speleo.start.presentation.component
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -2599,7 +2679,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.onFocusChanged
@@ -2706,12 +2791,17 @@ fun TitleCaseTextField(
 app/src/main/java/com/speleo/start/presentation/screen/PlaceholderScreen.kt>>>
 package com.speleo.start.presentation.screen
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

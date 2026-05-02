@@ -1,3 +1,1418 @@
+app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterVM.kt>>>
+package com.speleo.start.presentation.screen.team
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.util.DateValidator
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class TeamRegisterVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val personRepo: PersonRepository,
+    private val participantRepo: ParticipantRepository,
+    private val competitionRepo: CompetitionRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _mentorSearchQuery = MutableStateFlow("")
+    val mentorSearchQuery: StateFlow<String> = _mentorSearchQuery.asStateFlow()
+
+    val searchResults = _searchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.length >= 2) personRepo.searchPersons(query) else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val mentorSearchResults = _mentorSearchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.length >= 2) {
+                personRepo.searchPersons(query).map { list ->
+                    list.filter { person ->
+                        val age = DateValidator.calculateAge(person.birthDate)
+                        age != null && age >= 18
+                    }
+                }
+            } else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _minTeamSize = MutableStateFlow(2)
+    val minTeamSize: StateFlow<Int> = _minTeamSize.asStateFlow()
+
+    private val _event = MutableSharedFlow<UiEvent>()
+    val event: SharedFlow<UiEvent> = _event.asSharedFlow()
+
+    sealed class UiEvent {
+        data class ShowMessage(val message: String) : UiEvent()
+        data class ConflictDialog(val personName: String, val teamNumber: Int, val className: String, val teamId: Long) : UiEvent()
+        data class NavigateToTeam(val teamId: Long) : UiEvent()
+        object NavigateBack : UiEvent()
+    }
+
+    fun loadCompetitionSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val json = comp.settingsJson
+            val minSize = try {
+                """"min_team_size"\s*:\s*(\d+)""".toRegex().find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 2
+            } catch (e: Exception) { 2 }
+            _minTeamSize.value = minSize
+        }
+    }
+
+    fun onSearchQueryChange(query: String) { _searchQuery.value = query }
+    fun onMentorSearchQueryChange(query: String) { _mentorSearchQuery.value = query }
+
+    fun onPersonSelected(person: PersonEntity, onSelect: () -> Unit) {
+        viewModelScope.launch {
+            val compId = prefs.activeCompetitionId
+            if (compId == -1L) return@launch
+            val existing = participantRepo.findActiveByPersonAndComp(person.id, compId)
+            if (existing != null) {
+                val team = teamRepo.getTeamById(existing.teamId)
+                if (team != null) {
+                    _event.emit(UiEvent.ConflictDialog(
+                        personName = "${person.lastName} ${person.firstName}",
+                        teamNumber = team.teamNumber,
+                        className = team.className,
+                        teamId = team.id
+                    ))
+                    return@launch
+                }
+            }
+            onSelect()
+        }
+    }
+
+    fun getPersonById(id: Long, callback: (PersonEntity?) -> Unit) {
+        viewModelScope.launch { callback(personRepo.getPersonById(id)) }
+    }
+
+    fun createQuickMentor(lastName: String, firstName: String, onCreated: (Long) -> Unit) {
+        viewModelScope.launch {
+            val id = personRepo.createPerson(
+                lastName = lastName, firstName = firstName.ifBlank { "Ментор" }, birthDate = null, gender = null
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("Ментор создан"))
+                onCreated(id)
+            } else _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+        }
+    }
+
+    fun createQuickPerson(
+        lastName: String, firstName: String, middleName: String?,
+        birthDate: String?, phone: String?, gender: String?,
+        onCreated: (Long) -> Unit
+    ) {
+        viewModelScope.launch {
+            val id = personRepo.createPerson(
+                lastName = lastName, firstName = firstName, middleName = middleName,
+                birthDate = birthDate, phone = phone, gender = gender
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("Персона создана"))
+                onCreated(id)
+            } else _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+        }
+    }
+
+    fun registerTeam(className: String, members: List<MemberDraft>) {
+        viewModelScope.launch {
+            val competitionId = prefs.activeCompetitionId
+            if (competitionId == -1L) {
+                _event.emit(UiEvent.ShowMessage("Нет активного соревнования"))
+                return@launch
+            }
+
+            val resolvedMembers = members.map { draft ->
+                if (draft.isQuickCreate) {
+                    val personId = personRepo.createPerson(
+                        lastName = draft.quickLastName,
+                        firstName = draft.quickFirstName,
+                        middleName = draft.quickMiddleName.ifBlank { null },
+                        birthDate = draft.quickBirthDate.ifBlank { null },
+                        phone = draft.quickPhone.ifBlank { null },
+                        gender = draft.quickGender
+                    )
+                    if (personId == -1L) {
+                        _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+                        return@launch
+                    }
+                    val savedPerson = personRepo.getPersonById(personId)
+                    if (savedPerson != null) draft.copy(person = savedPerson, isQuickCreate = false) else draft
+                } else draft
+            }
+
+            val invalidMembers = resolvedMembers.filter { member ->
+                when (member.ageGroup) {
+                    AgeGroup.MINOR -> member.mentor == null || !member.mentorConfirmed
+                    AgeGroup.CHILD -> member.mentor == null || !member.mentorConfirmed || !member.judgeApproved
+                    else -> false
+                }
+            }
+            if (invalidMembers.isNotEmpty()) {
+                _event.emit(UiEvent.ShowMessage("Проверьте менторов и разрешения судьи"))
+                return@launch
+            }
+
+            val maxNumber = teamRepo.getMaxTeamNumber(competitionId, className) ?: 0
+            val teamNumber = maxNumber + 1
+            val teamId = teamRepo.createTeam(competitionId = competitionId, teamNumber = teamNumber, className = className)
+            if (teamId == -1L) {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания команды"))
+                return@launch
+            }
+
+            resolvedMembers.forEachIndexed { index, member ->
+                val person = member.person ?: return@forEachIndexed
+                val mentorId = member.mentor?.id
+                val participantId = participantRepo.addParticipant(
+                    teamId = teamId, personId = person.id,
+                    role = if (index == 0) "captain" else "member", mentorId = mentorId
+                )
+                if (participantId == -1L) {
+                    _event.emit(UiEvent.ShowMessage("Ошибка добавления участника"))
+                    return@launch
+                }
+                if (mentorId != null || member.judgeApproved) {
+                    participantRepo.updateMentorAndFlags(
+                        id = participantId, mentorId = mentorId,
+                        mentorConfirmed = member.mentor != null,
+                        judgeApproved = member.judgeApproved
+                    )
+                }
+            }
+            _event.emit(UiEvent.ShowMessage("Команда №$teamNumber сохранена"))
+            _event.emit(UiEvent.NavigateBack)
+        }
+    }
+}
+
+enum class AgeGroup { ADULT, MINOR, CHILD, UNKNOWN }
+
+data class MemberDraft(
+    val person: PersonEntity? = null,
+    val isQuickCreate: Boolean = false,
+    val ageGroup: AgeGroup = AgeGroup.UNKNOWN,
+    val mentor: PersonEntity? = null,
+    val mentorConfirmed: Boolean = false,
+    val judgeApproved: Boolean = false,
+    var quickLastName: String = "",
+    var quickFirstName: String = "",
+    var quickMiddleName: String = "",
+    var quickBirthDate: String = "",
+    var quickPhone: String = "",
+    var quickGender: String = "male"
+) {
+    val isValid: Boolean
+        get() = when {
+            person != null -> true
+            isQuickCreate -> quickLastName.isNotBlank() && quickFirstName.isNotBlank() &&
+                    (quickBirthDate.isBlank() || (quickBirthDate.length == 10 && DateValidator.isRealDate(quickBirthDate)))
+            else -> false
+        }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/teamcard/TeamCardScreen.kt>>>
+package com.speleo.start.presentation.screen.teamcard
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TeamCardScreen(
+    teamId: Long,
+    onBack: () -> Unit,
+    vm: TeamCardVM = hiltViewModel()
+) {
+    val card by vm.teamCard.collectAsStateWithLifecycle()
+
+    LaunchedEffect(teamId) { vm.loadTeam(teamId) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Карточка команды") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        },
+        floatingActionButton = {
+            val fabAction = vm.getFabAction()
+            if (fabAction != null) {
+                FloatingActionButton(
+                    onClick = { },
+                    containerColor = Color(0xFFD32F2F)
+                ) {
+                    Text(if (fabAction == "finish") "🏁" else "📄", fontSize = 20.sp)
+                }
+            }
+        }
+    ) { padding ->
+        if (card != null) {
+            val info = card!!
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("№${info.number} · ${info.className}-й класс", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Статус: ${info.status}")
+                            Text("Метка: ${vm.getColorMarkText()}")
+                        }
+                    }
+                }
+
+                item { Text("👥 Состав (${info.members.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+
+                itemsIndexed(info.members) { _, member ->
+                    Card(modifier = Modifier.fillMaxWidth().clickable { }) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("${member.lastName} ${member.firstName}${member.nickname?.let { " «$it»" } ?: ""}", fontWeight = FontWeight.Bold)
+                            if (member.age != null) Text("Возраст: ${member.age} лет", fontSize = 14.sp)
+                            if (member.phone != null) Text("📞 ${member.phone}", fontSize = 14.sp)
+                            if (member.mentorName != null) Text("👨‍🏫 Ментор: ${member.mentorName} ${if (member.mentorConfirmed) "✅" else "⚠️"}", fontSize = 14.sp)
+                            if (member.judgeApproved) Text("✅ Разрешено судьёй", color = Color(0xFF2E7D32), fontSize = 14.sp)
+                            Text("Роль: ${if (member.role == "captain") "Капитан" else "Участник"}", fontSize = 14.sp)
+                        }
+                    }
+                }
+
+                if (info.replacedCount > 0) {
+                    item {
+                        Text("🔄 История замен (${info.replacedCount})", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("(свёрнуто)", fontSize = 14.sp, color = Color.Gray)
+                    }
+                }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Загрузка...", fontSize = 18.sp)
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/teamcard/TeamCardVM.kt>>>
+package com.speleo.start.presentation.screen.teamcard
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.MentorRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.util.AgeCalculator
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class TeamCardMember(
+    val participantId: Long,
+    val personId: Long,
+    val firstName: String,
+    val lastName: String,
+    val nickname: String?,
+    val birthDate: String?,
+    val phone: String?,
+    val gender: String?,
+    val age: Int?,
+    val role: String,
+    val mentorName: String?,
+    val mentorConfirmed: Boolean,
+    val judgeApproved: Boolean
+)
+
+data class TeamCardInfo(
+    val teamId: Long,
+    val number: Int,
+    val className: String,
+    val status: String,
+    val colorMark: String,
+    val startTimestamp: Long?,
+    val finishTimestamp: Long?,
+    val members: List<TeamCardMember>,
+    val replacedCount: Int
+)
+
+@HiltViewModel
+class TeamCardVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val participantRepo: ParticipantRepository,
+    private val personRepo: PersonRepository,
+    private val mentorRepo: MentorRepository,
+    private val prefs: com.speleo.start.data.local.PreferencesManager
+) : ViewModel() {
+
+    private val _teamCard = MutableStateFlow<TeamCardInfo?>(null)
+    val teamCard: StateFlow<TeamCardInfo?> = _teamCard.asStateFlow()
+
+    fun loadTeam(teamId: Long) {
+        viewModelScope.launch {
+            val team = teamRepo.getTeamById(teamId) ?: return@launch
+            val participants = participantRepo.getAllParticipantsByTeam(teamId)
+
+            val members = mutableListOf<TeamCardMember>()
+            participants.first().forEach { p ->
+                val person = personRepo.getPersonById(p.personId)
+                val mentor = if (p.mentorId != null) mentorRepo.getMentorByParticipantId(p.id) else null
+                val mentorPerson = if (mentor != null) personRepo.getPersonById(mentor.personId) else null
+
+                if (person != null) {
+                    val age = AgeCalculator.calculateAge(person.birthDate)
+
+                    members.add(
+                        TeamCardMember(
+                            participantId = p.id,
+                            personId = person.id,
+                            firstName = person.firstName,
+                            lastName = person.lastName,
+                            nickname = person.nickname,
+                            birthDate = person.birthDate,
+                            phone = person.phone,
+                            gender = person.gender,
+                            age = age,
+                            role = p.role,
+                            mentorName = mentorPerson?.let { "${it.lastName} ${it.firstName}" },
+                            mentorConfirmed = p.mentorConfirmed,
+                            judgeApproved = p.judgeApproved
+                        )
+                    )
+                }
+            }
+
+            _teamCard.value = TeamCardInfo(
+                teamId = team.id,
+                number = team.teamNumber,
+                className = team.className,
+                status = team.status,
+                colorMark = team.colorMark,
+                startTimestamp = team.startTimestamp,
+                finishTimestamp = team.finishTimestamp,
+                members = members,
+                replacedCount = participants.first().count { it.statusMember == "replaced" }
+            )
+        }
+    }
+
+    fun getColorMarkText(): String {
+        val card = _teamCard.value ?: return ""
+        val hasMinor = card.members.any { it.age != null && it.age in 14..17 && !it.mentorConfirmed }
+        val hasChild = card.members.any { it.age != null && it.age < 14 && !it.judgeApproved }
+        return when {
+            card.status == "disqualified" -> "СНЯТЫ"
+            hasChild -> "<14 !!!"
+            hasMinor -> "<17 !!!"
+            else -> {
+                if (card.members.any { it.age != null && it.age in 14..17 }) "14+"
+                else if (card.members.any { it.age != null && it.age < 14 }) "<14ок"
+                else "18+"
+            }
+        }
+    }
+
+    fun getColorMarkType(): String {
+        val card = _teamCard.value ?: return "green"
+        val hasMinor = card.members.any { it.age != null && it.age in 14..17 && !it.mentorConfirmed }
+        val hasChild = card.members.any { it.age != null && it.age < 14 && !it.judgeApproved }
+        return when {
+            card.status == "disqualified" -> "red"
+            hasMinor || hasChild -> "orange"
+            else -> "green"
+        }
+    }
+
+    fun getFabAction(): String? {
+        val card = _teamCard.value ?: return null
+        return when (card.status) {
+            "started" -> "finish"
+            "finished" -> "route"
+            else -> null
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/teamlist/TeamListScreen.kt>>>
+package com.speleo.start.presentation.screen.teamlist
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TeamListScreen(
+    onBack: () -> Unit,
+    onTeamClick: (Long) -> Unit,
+    vm: TeamListVM = hiltViewModel()
+) {
+    val teams by vm.teams.collectAsStateWithLifecycle()
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadTeams() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Команды") },
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text("← Назад") }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(12.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { vm.onSearchQueryChange(it) },
+                label = { Text("🔍 Поиск по номеру или фамилии") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (teams.isEmpty()) {
+                Text("Нет команд", fontSize = 16.sp)
+            } else {
+                LazyColumn {
+                    items(teams, key = { it.id }) { team ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(2.dp)
+                                .clickable {
+                                    vm.selectTeam(team.id)
+                                    onTeamClick(team.id)
+                                }
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "№${team.number} (${team.className}-й кл)",
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                    Text(
+                                        team.colorMark,
+                                        fontSize = 14.sp,
+                                        color = when (team.colorMark) {
+                                            "СНЯТЫ" -> Color(0xFFD32F2F)
+                                            "<17 !!!", "<14 !!!" -> Color(0xFFF57C00)
+                                            else -> Color(0xFF00A86B)
+                                        }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (team.memberNames.isNotBlank()) {
+                                    Text(
+                                        team.memberNames,
+                                        fontSize = 13.sp,
+                                        color = Color.Gray,
+                                        maxLines = 1
+                                    )
+                                }
+                                Text(
+                                    team.timeInfo,
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/teamlist/TeamListVM.kt>>>
+package com.speleo.start.presentation.screen.teamlist
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.presentation.SharedState
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class TeamListInfo(
+    val id: Long,
+    val number: Int,
+    val className: String,
+    val status: String,
+    val colorMark: String = "",
+    val memberNames: String = "",
+    val timeInfo: String = ""
+)
+
+@HiltViewModel
+class TeamListVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val participantRepo: ParticipantRepository,
+    private val personRepo: PersonRepository,
+    private val prefs: PreferencesManager,
+    private val sharedState: SharedState
+) : ViewModel() {
+
+    private val _teams = MutableStateFlow<List<TeamListInfo>>(emptyList())
+    val teams: StateFlow<List<TeamListInfo>> = _teams.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    fun loadTeams() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            teamRepo.getTeamsByCompetition(cid)
+                .combine(_searchQuery) { teams, query ->
+                    teams.filter { team ->
+                        query.isBlank() || team.teamNumber.toString().contains(query)
+                    }
+                }
+                .collect { teams ->
+                    val result = teams.map { team ->
+                        val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
+                        val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
+
+                        val memberNames = persons.joinToString(", ") { "${it.lastName} ${it.firstName.take(1)}." }
+
+                        val hasMinor = persons.any { person ->
+                            person.birthDate?.let { birth ->
+                                try {
+                                    val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                                    val bd = sdf.parse(birth)
+                                    val today = java.util.Calendar.getInstance()
+                                    val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                    var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
+                                    if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                                    age in 14..17
+                                } catch (e: Exception) { false }
+                            } ?: false
+                        }
+
+                        val hasChild = persons.any { person ->
+                            person.birthDate?.let { birth ->
+                                try {
+                                    val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                                    val bd = sdf.parse(birth)
+                                    val today = java.util.Calendar.getInstance()
+                                    val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                    var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
+                                    if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                                    age < 14
+                                } catch (e: Exception) { false }
+                            } ?: false
+                        }
+
+                        val colorMark = when {
+                            team.status == "disqualified" -> "СНЯТЫ"
+                            team.status == "lost" -> "Lost"
+                            hasChild -> "<14 !!!"
+                            hasMinor -> "<17 !!!"
+                            else -> "18+"
+                        }
+
+                        TeamListInfo(
+                            id = team.id,
+                            number = team.teamNumber,
+                            className = team.className,
+                            status = team.status,
+                            colorMark = colorMark,
+                            memberNames = memberNames,
+                            timeInfo = when (team.status) {
+                                "started" -> "В пути"
+                                "finished" -> "Финиш"
+                                "registered" -> "Ожидает"
+                                "lost" -> "Потеряна"
+                                "disqualified" -> "Снята"
+                                else -> team.status
+                            }
+                        )
+                    }
+                    _teams.value = result
+                }
+        }
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun selectTeam(teamId: Long) {
+        sharedState.selectTeam(teamId)
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/SharedState/SharedState.kt>>>
+package com.speleo.start.presentation
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class SharedState @Inject constructor() {
+
+    private val _selectedTeamId = MutableStateFlow(1L)
+    val selectedTeamId: StateFlow<Long> = _selectedTeamId.asStateFlow()
+
+    fun selectTeam(teamId: Long) {
+        _selectedTeamId.value = teamId
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/ui/theme/Color.kt>>>
+package com.speleo.start.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val Purple80 = Color(0xFFD0BCFF)
+val PurpleGrey80 = Color(0xFFCCC2DC)
+val Pink80 = Color(0xFFEFB8C8)
+
+val Purple40 = Color(0xFF6650a4)
+val PurpleGrey40 = Color(0xFF625b71)
+val Pink40 = Color(0xFF7D5260)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/ui/theme/Theme.kt>>>
+package com.speleo.start.ui.theme
+
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+
+private val DarkColorScheme = darkColorScheme(
+    primary = Purple80,
+    secondary = PurpleGrey80,
+    tertiary = Pink80
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = Purple40,
+    secondary = PurpleGrey40,
+    tertiary = Pink40
+
+    /* Other default colors to override
+    background = Color(0xFFFFFBFE),
+    surface = Color(0xFFFFFBFE),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onTertiary = Color.White,
+    onBackground = Color(0xFF1C1B1F),
+    onSurface = Color(0xFF1C1B1F),
+    */
+)
+
+@Composable
+fun SpeleoStartTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    // Dynamic color is available on Android 12+
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/ui/theme/Type.kt>>>
+package com.speleo.start.ui.theme
+
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+// Set of Material typography styles to start with
+val Typography = Typography(
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    )
+    /* Other default text styles to override
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    )
+    */
+)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/util/AgeCalculator.kt>>>
+package com.speleo.start.util
+
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+
+object AgeCalculator {
+
+    private val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+
+    /**
+     * Вычисляет точный возраст в годах с учётом дня и месяца рождения.
+     * Возвращает null, если дата невалидна или не задана.
+     */
+    fun calculateAge(birthDateString: String?): Int? {
+        if (birthDateString.isNullOrBlank() || birthDateString.length != 10) return null
+
+        return try {
+            dateFormat.isLenient = false
+            val birthDate = dateFormat.parse(birthDateString) ?: return null
+
+            val today = Calendar.getInstance()
+            val birthCal = Calendar.getInstance().apply { time = birthDate }
+
+            var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
+            if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) {
+                age--
+            }
+            age
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Проверяет, может ли человек быть ментором (≥18 лет).
+     * Динамический расчёт — не зависит от захардкоженного флага.
+     */
+    fun canBeMentor(birthDateString: String?): Boolean {
+        val age = calculateAge(birthDateString) ?: return false
+        return age >= 18
+    }
+
+    /**
+     * Возвращает цветовую метку возраста для UI.
+     * @return Pair<метка_текст, цвет_hex>
+     */
+    fun getAgeColorMark(birthDateString: String?): AgeMark {
+        val age = calculateAge(birthDateString) ?: return AgeMark.UNKNOWN
+
+        return when {
+            age < 14 -> AgeMark.UNDER_14
+            age in 14..17 -> AgeMark.MINOR
+            age in 18..70 -> AgeMark.ADULT
+            age > 70 -> AgeMark.SENIOR
+            else -> AgeMark.UNKNOWN
+        }
+    }
+
+    enum class AgeMark(val label: String, val colorHex: String) {
+        UNDER_14("<14", "#FFC107"),
+        MINOR("14+", "#FFC107"),
+        ADULT("18+", "#00A86B"),
+        SENIOR("70+", "#FF8C00"),
+        UNKNOWN("?", "#9E9E9E")
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/util/DateValidator.kt>>>
+package com.speleo.start.util
+
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+
+object DateValidator {
+
+    private val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+
+    fun isValid(date: String): Boolean {
+        if (date.length != 10) return false
+        return try {
+            dateFormat.isLenient = false
+            dateFormat.parse(date)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun formatAsYouType(input: String): String {
+        val digits = input.filter { it.isDigit() }.take(8)
+        val sb = StringBuilder()
+        for (i in digits.indices) {
+            if (i == 2 || i == 4) sb.append(".")
+            sb.append(digits[i])
+        }
+        return sb.toString()
+    }
+
+    fun isRealDate(date: String): Boolean {
+        if (date.length != 10) return false
+
+        return try {
+            val parts = date.split(".")
+            if (parts.size != 3) return false
+
+            val day = parts[0].toIntOrNull() ?: return false
+            val month = parts[1].toIntOrNull() ?: return false
+            val year = parts[2].toIntOrNull() ?: return false
+
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            if (year < 1900 || year > currentYear) return false
+
+            if (month !in 1..12) return false
+
+            val maxDay = when (month) {
+                1, 3, 5, 7, 8, 10, 12 -> 31
+                4, 6, 9, 11 -> 30
+                2 -> {
+                    val isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+                    if (isLeap) 29 else 28
+                }
+                else -> return false
+            }
+            day in 1..maxDay
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun calculateAge(birthDateString: String?): Int? {
+        if (birthDateString.isNullOrBlank()) return null
+        if (birthDateString.length != 10) return null
+
+        return try {
+            dateFormat.isLenient = false
+            val birthDate = dateFormat.parse(birthDateString) ?: return null
+
+            val today = Calendar.getInstance()
+            val birthCal = Calendar.getInstance().apply { time = birthDate }
+
+            var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
+            if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) {
+                age--
+            }
+            if (age < 0) return null
+            age
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun canBeMentor(birthDateString: String?): Boolean {
+        val age = calculateAge(birthDateString) ?: return false
+        return age >= 18
+    }
+
+    fun getAgeColorMark(birthDateString: String?): AgeMark {
+        val age = calculateAge(birthDateString) ?: return AgeMark.UNKNOWN
+        return when {
+            age < 14 -> AgeMark.UNDER_14
+            age in 14..17 -> AgeMark.MINOR
+            age in 18..70 -> AgeMark.ADULT
+            else -> AgeMark.SENIOR
+        }
+    }
+
+    enum class AgeMark(val label: String, val colorHex: String) {
+        UNDER_14("<14", "#FFC107"),
+        MINOR("14+", "#FFC107"),
+        ADULT("18+", "#00A86B"),
+        SENIOR("70+", "#FF8C00"),
+        UNKNOWN("?", "#9E9E9E")
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/util/PhoneFormatter.kt>>>
+package com.speleo.start.util
+
+object PhoneFormatter {
+
+    fun formatAsYouType(input: String): String {
+        val raw = input.filter { it.isDigit() }
+        val digits = if (raw.startsWith("7") || raw.startsWith("8")) raw.drop(1) else raw
+        val limited = digits.take(10)
+
+        if (limited.isEmpty()) return ""
+
+        val sb = StringBuilder("+7")
+        if (limited.isNotEmpty()) sb.append(" (")
+
+        for (i in limited.indices) {
+            if (i == 3) sb.append(") ")
+            if (i == 6 || i == 8) sb.append("-")
+            sb.append(limited[i])
+        }
+        return sb.toString()
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/util/StringExt.kt>>>
+package com.speleo.start.util
+
+import java.util.Locale
+
+object StringExt {
+    fun String.toTitleCase(): String {
+        if (isEmpty()) return this
+        return this[0].uppercase(Locale.getDefault()) + substring(1).lowercase(Locale.getDefault())
+    }
+}
+<<<конец файла
+
+app/src/main/res/drawable/ic_launcher_background.xml>>>
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9,0L9,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,0L19,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,0L29,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,0L39,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,0L49,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,0L59,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,0L69,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,0L79,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M89,0L89,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M99,0L99,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,9L108,9"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,19L108,19"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,29L108,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,39L108,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,49L108,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,59L108,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,69L108,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,79L108,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,89L108,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,99L108,99"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,29L89,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,39L89,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,49L89,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,59L89,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,69L89,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,79L89,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,19L29,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,19L39,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,19L49,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,19L59,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,19L69,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,19L79,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+</vector>
+
+<<<конец файла
+
+app/src/main/res/drawable/ic_launcher_foreground.xml>>>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="85.84757"
+                android:endY="92.4963"
+                android:startX="42.9492"
+                android:startY="49.59793"
+                android:type="linear">
+                <item
+                    android:color="#44000000"
+                    android:offset="0.0" />
+                <item
+                    android:color="#00000000"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="nonZero"
+        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
+        android:strokeWidth="1"
+        android:strokeColor="#00000000" />
+</vector>
+<<<конец файла
+
+app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml>>>
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+<<<конец файла
+
+app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml>>>
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+<<<конец файла
+
+app/src/main/res/values/colors.xml>>>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
+<<<конец файла
+
+app/src/main/res/values/strings.xml>>>
+<resources>
+    <string name="app_name">SpeleoStart</string>
+</resources>
+<<<конец файла
+
+app/src/main/res/values/themes.xml>>>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.SpeleoStart" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
+<<<конец файла
+
+app/src/main/res/xml/backup_rules.xml>>>
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample backup rules file; uncomment and customize as necessary.
+   See https://developer.android.com/guide/topics/data/autobackup
+   for details.
+   Note: This file is ignored for devices older than API 31
+   See https://developer.android.com/about/versions/12/backup-restore
+-->
+<full-backup-content>
+    <!--
+   <include domain="sharedpref" path="."/>
+   <exclude domain="sharedpref" path="device.xml"/>
+-->
+</full-backup-content>
+<<<конец файла
+
+app/src/main/res/xml/data_extraction_rules.xml>>>
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample data extraction rules file; uncomment and customize as necessary.
+   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   for details.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- TODO: Use <include> and <exclude> to control what is backed up.
+        <include .../>
+        <exclude .../>
+        -->
+    </cloud-backup>
+    <!--
+    <device-transfer>
+        <include .../>
+        <exclude .../>
+    </device-transfer>
+    -->
+</data-extraction-rules>
+<<<конец файла
+
+app/src/test/java/com/speleo/start/ExampleUnitTest.kt>>>
+package com.speleo.start
+
+import org.junit.Test
+
+import org.junit.Assert.*
+
+/**
+ * Example local unit test, which will execute on the development machine (host).
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+class ExampleUnitTest {
+    @Test
+    fun addition_isCorrect() {
+        assertEquals(4, 2 + 2)
+    }
+}
+<<<конец файла
+
 docs/ARCHITECTURE.md>>>
 # 🏗️ ARCHITECTURE.md · SpeleoStart
 **Платформа:** Android (Kotlin, Compose) | **Архитектура:** MVVM + Clean
@@ -248,6 +1663,39 @@ docs/CHANGELOG.md>>>
 
 ### ✅ Статус
 - Все 4 пункта ТЗ по экрану «Регистрация» реализованы и протестированы
+
+## [2026-05-01] — Экран настроек соревнования
+
+### Добавлено
+- Полная реализация `CompetitionSettingsScreen` по ТЗ
+- `CompetitionSettingsVM` с загрузкой по `competitionId`, валидацией, сохранением `settingsJson`
+- Отображение КП кластерами по классам с цветовой дифференциацией (normal/technical)
+- Диалог редактирования типа КП
+- Интеграция с `MasterRouteCardRepository` через Flow
+- Визуальная группировка КП в рамки с label класса на границе
+
+### Изменено
+- `Icons.Default.ArrowBack` → `Icons.AutoMirrored.Filled.ArrowBack` (deprecated fix)
+
+### Технические детали
+- Sealed class `SettingsUiEvent` (изолирован от общего `UiEvent`)
+- Использование `FlowRow` для адаптивного расположения кластеров
+- `OutlinedCard` + круглый label с `offset` для позиционирования на границе
+
+## [2026-05-01] — Экран настроек соревнования
+
+### Добавлено
+- Полная реализация `CompetitionSettingsScreen` по ТЗ
+- `CompetitionSettingsVM` с загрузкой по `competitionId`, валидацией, сохранением `settingsJson`
+- Отображение КП кластерами по классам (КЛАСС 2 / КЛАСС 3)
+- Цветовая дифференциация КП: зелёный `#2E7D32` (normal), оранжевый `#F57C00` (technical)
+- Диалог редактирования типа КП (обычный/технический)
+- Интеграция с `MasterRouteCardRepository` через Flow
+- Визуальная группировка КП в рамки `OutlinedCard` с круглым label класса на границе
+- Поле «Минимальный состав команды» в `settingsJson`
+
+### Изменено
+- `Icons.Default.ArrowBack` → `Icons.AutoMirrored.Filled.ArrowBack` (deprecated fix)
 <<<конец файла
 
 docs/Logic_Processes.md>>>
@@ -766,452 +2214,5 @@ docs/TZ_Corrections.md>>>
     - **Дата:** 25.04.2026 (выстрадано)
     - **Инициатор:** 4-часовой баг `FOREIGN KEY`
     - **Причина:** Старые данные + новая схема = крах. Всегда `version++`.
-<<<конец файла
-
-docs/TZ_v4_Full.md>>>
-# ТЕХНИЧЕСКОЕ ЗАДАНИЕ v4.1
-## Подземное ориентирование · СпелеоСтарт
-
----
-
-## РАЗДЕЛ 1: ГЛОССАРИЙ (18 терминов)
-
-### 1.1. Соревнование (Competition)
-Отдельное мероприятие по спортивному ориентированию.
-
-**Свойства:**
-- `name` — полное название (для протоколов)
-- `shortName` — краткое название (для статус-бара)
-- `date`, `place`, `discipline`, `system`, `settingsJson`
-- Жизненный цикл: СОЗДАНО → АКТИВНО → ЗАВЕРШЕНО → АРХИВИРОВАНО → УДАЛЕНО (и ОТМЕНЕНО)
-
-### 1.2. Персона (Person)
-Физическое лицо в общей базе. ФИО, дата рождения, пол, телефон, email, заметка, чёрная метка, никнейм, `canBeMentor`.
-
-### 1.3. Участник (Participant)
-Роль персоны в команде. Статусы: `active`, `replaced`, `free_agent`. Роли: `captain`, `member`.
-
-### 1.4. Свободный агент (Free Agent)
-Участник без активной команды. Может быть добавлен в другую.
-
-### 1.5. Команда (Team)
-Группа участников (от 2). Статусы: `registered`, `started`, `finished`, `disqualified`, `lost`.
-Цветовые метки: `18+`, `14+`, `<14ок`, `<17 !!!`, `<14 !!!`, `СНЯТЫ`.
-
-### 1.6. Класс сложности (Class)
-2-й класс (КВ 90 мин), 3-й класс (КВ 60 мин). Разные наборы КП.
-
-### 1.7. КП (Checkpoint)
-Точка на дистанции. Номер, вес, тип (обычный/технический), норматив, бонус.
-
-### 1.8. Эталонный маршрутный лист (Master Route Card)
-Конфигурация всех КП из настроек.
-
-### 1.9. Путевой лист (Team Route Card)
-Фактические отметки команды по КП. Подтверждается секретарём и судьёй.
-
-### 1.10. Старт (Start)
-Момент начала движения. Интервал из настроек, чередование 2→3→2→3, первая команда 10 сек.
-
-### 1.11. Финиш (Finish)
-Время финиша = момент открытия диалога. Множественный финиш. Ручная корректировка.
-
-### 1.12. Главный таймер (Main Timer)
-`ММ:СС.сс`, от первого старта. Не останавливается. Восстанавливается после краша через `app_settings`.
-### 1.13. Обратный отсчёт (Countdown Timer)
-До старта текущей команды. Звук 800/1000 Гц.
-
-### 1.14. КВ (Control Time)
-90 мин (2-й класс), 60 мин (3-й класс). Просрочка → `lost`.
-
-### 1.15. ПСР (Search & Rescue)
-Статус `lost`, флаг `psrResolved`.
-
-### 1.16. Откат старта (Rollback)
-Возврат в `registered`. Если единственная на дистанции → сброс таймера.
-
-### 1.17. Настройки соревнования (Competition Settings)
-JSON с параметрами: интервал, КВ, КП, кастомные поля.
-
-### 1.18. Ментор (Mentor)
-Совершеннолетний (≥18), ответственный за участника <18. Может быть участником другой команды.
-
----
-
-## РАЗДЕЛ 2: СУЩНОСТИ И СВЯЗИ
-
-### Основные связи
-| Связь | Тип | Внешний ключ |
-|-------|-----|-------------|
-| COMPETITION → TEAM | 1:N | `team.competitionId` |
-| TEAM → PARTICIPANT | 1:N | `participant.teamId` |
-| PERSON → PARTICIPANT | 1:N | `participant.personId` |
-| PERSON → MENTOR | 1:1 | `mentor.personId` |
-| MENTOR → PARTICIPANT | 1:N | `participant.mentorId` |
-| COMPETITION → MASTER_ROUTE_CARD | 1:N | `master_route_card.competitionId` |
-| MASTER_ROUTE_CARD → TEAM_ROUTE_CARD | 1:N | `team_route_card.checkpointId` |
-
-### Правила целостности
-- **R1:** Не стартовать без мин. участников
-- **R2:** Одна персона не дважды в одной команде
-- **R3:** Персона активна только в одной команде соревнования
-- **R4:** Ментор ≥18 лет
-- **R5:** Не редактировать подтверждённый ПЛ
-
----
-
-## РАЗДЕЛ 3: БАЗА ДАННЫХ
-
-### Таблицы
-1. `competitions` — соревнования
-2. `persons` — персоны
-3. `teams` — команды
-4. `participants` — участники
-5. `mentors` — менторы6. `master_route_card` — эталонный МЛ
-7. `team_route_card` — путевые листы
-8. `app_settings` — настройки (key-value)
-
-### Индексы
-Созданы для всех внешних ключей и полей поиска.
-
-### Триггеры
-- `check_person_active_in_one_team` — R3
-- `check_mentor_age` — R4
-- `prevent_edit_confirmed_route_card` — R5
-
-### Версия БД: 5
-
----
-
-## РАЗДЕЛ 4: СОРЕВНОВАНИЯ
-
-### Жизненный цикл
-`СОЗДАНО → АКТИВНО → ЗАВЕРШЕНО → АРХИВИРОВАНО → УДАЛЕНО`  
-`↓`  
-`ОТМЕНЕНО`
-
-### Создание (мастер)
-1. Основное: `name`, `shortName`, `date`, `place`, `discipline`, `system`
-2. Параметры старта: интервал, КВ
-3. Классы: 2-й (90 мин), 3-й (60 мин)
-4. Возраст: мин. 14 лет, правило <14, формат даты
-5. КП: список с весами и типами
-6. Пользовательские поля
-
-### Финализация
-Требует: все ПЛ введены, все статусы финальные. Пароль судьи. Данные → `read-only`.
-
----
-
-## РАЗДЕЛ 5: УЧАСТНИКИ И ПЕРСОНЫ
-
-### Персона
-- ФИО (`lastName`, `firstName`, `middleName`)
-- `nickname` (позывной)
-- `birthDate`, `phone`, `email`, `gender`
-- `note` (заметка), `blacklisted` (чёрная метка)
-- `canBeMentor` (флаг «может быть ментором», ≥18 лет)
-
-### Участник
-- Статусы: `active`, `replaced`, `free_agent`
-- Роль: `captain`, `member`
-- `mentorId`, `mentorConfirmed`, `judgeApproved`
-### Ментор
-- ≥18 лет, может быть участником другой команды
-- Один ментор — много подопечных
-- Подтверждение ответственности
-
-### Автоподстановка
-- Поиск по 3+ символам фамилии или 4+ цифрам телефона
-- Источник: база персон или словарь имён
-
----
-
-## РАЗДЕЛ 6: КОМАНДЫ
-
-### Статусы
-`registered` → `started` → `finished`  
-Любой → `disqualified`  
-`started` → `lost` → (учёт ожидания) → `finished`
-
-### Цветовые метки
-- `18+` — все ≥18
-- `14+` — есть 14-17, ментор подтверждён
-- `<14ок` — есть <14, ментор + разрешение
-- `<17 !!!` — есть 14-17, ментор НЕ подтверждён
-- `<14 !!!` — есть <14, НЕТ разрешения
-- `СНЯТЫ` — `disqualified`
-
-### Нумерация
-Сквозная в рамках класса и соревнования.
-
-### Расформирование
-- `registered` → без пароля, участники → `free_agent`
-- `started` → с паролем + причина + возврат в `registered`
-- `finished/lost/disqualified` → запрещено
-
----
-
-## РАЗДЕЛ 7: СТАРТ
-
-### Очередь
-- Из `registered` команд
-- Чередование 2→3→2→3
-- Если класс пуст — подряд оставшиеся
-- Пустая очередь → отсчёт остановлен, ждёт
-
-### Таймеры
-- Главный: `System.currentTimeMillis() - startTimestamp`
-- Обратный: 10 сек (первая), интервал из настроек (остальные)
-- Восстановление через `app_settings`
-
-### Кнопки- НАЧАТЬ СОРЕВНОВАНИЯ → 10-сек отсчёт
-- СНЯТЬ, ПРОПУСК, СТАРТ
-- ПАУЗА/ПУСК
-
-### Drag-and-drop очереди
-Запрещён при ≤10 сек до старта.
-
----
-
-## РАЗДЕЛ 8: ФИНИШ
-
-### Фиксация времени
-- `finishTimestamp = System.currentTimeMillis()` при открытии диалога
-- Всем выбранным — одинаковое время
-- Ручная корректировка: долгий тап + лог
-
-### Отображение
-- Две колонки: 2-й / 3-й класс
-- Только `started` команды
-
----
-
-## РАЗДЕЛ 9: КП И КАРТОЧКА
-
-### Эталонный МЛ
-- Настраивается в настройках соревнования
-- Поля: `displayNumber`, `weight`, `type`, `sortOrder`, `normativeSeconds`, `class2/3`, `trackWait`, `trackExec`, `bonusPoints`
-
-### Путевой лист
-- Таблица: №, вес, тип, взят, ошибка, отсечка, штраф
-- Подтверждение: секретарь + судья
-- После двойного подтверждения → `read-only`
-
-### Отсечка
-- Время ожидания на тех. КП
-- Вычитается из чистого времени
-- `net_time = (finish - start) - Σ(offset_time)`
-
-### Пересчёт `lost` → `finished`
-Если чистое время ≤ КВ после учёта отсечек.
-
----
-
-## РАЗДЕЛ 10: ИТОГИ
-
-### Ранжирование
-1. Статус: `finished` > `lost` > `disqualified`
-2. Баллы: больше → выше
-3. Чистое время: меньше → выше
-### Призовые места
-Всегда 3 (🥇🥈🥉). Под каждым может быть несколько команд.
-
-### Деление мест
-Судья вручную, с допуском по времени.
-
-### Грамоты
-PDF/HTML, ментор опционально, факсимиле (PNG).
-
-### Текст для ведущего
-Шаблон с подстановками `{gold_teams_list}` и т.д.
-
----
-
-## РАЗДЕЛ 11: UI/UX
-
-### Цвета
-- `primary`: `#1E5A7A`
-- `success`: `#00A86B`
-- `warning`: `#FFC107`
-- `danger`: `#D32F2F`
-- `timer`: `#00C853` (контрастно-зелёный)
-
-### Типографика
-- Таймер: `Roboto Mono`, 40sp/24sp
-- Заголовки: `Roboto Bold`, 24sp
-- Основной: `Roboto Regular`, 16sp
-
-### Размеры
-- Кнопки: 56dp высота
-- Плитки: 90dp высота, `aspectRatio 0.85`
-- Статус-бар: 48dp
-
-### Тёмная тема
-Адаптивная, `primaryContainer` для инфоплитки.
-
----
-
-## РАЗДЕЛ 12: ТЕХНИЧЕСКИЙ СТЕК
-
-- Kotlin 1.9.22
-- AGP 8.2.2, Gradle 8.5
-- Compose BOM 2024.02.00
-- Room 2.6.1, Hilt 2.48
-- Navigation Compose 2.7.7
-- Timber 5.0.1
-- Security Crypto 1.1.0-alpha06
-
-### Архитектура
-MVVM + Clean Architecture:  `Entity` → `DAO` → `Repository` → `UseCase` → `ViewModel` → `Screen`
-
-### Таймер
-`TimerManager` (Singleton, Flow-based, без Service).  
-Хранение `startTimestamp` в `app_settings`.  
-Восстановление: `System.currentTimeMillis() - startTimestamp`.  
-Резерв: `MIN(start_timestamp)` из `teams`.
-<<<конец файла
-
-docs/USER_GUIDE.md>>>
-# 🏆 СпелеоСтарт: Инструкция судьи
-*Коротко. По шагам. Без технических терминов.*
-
-## 🔹 Быстрый старт (3 минуты)
-1. Откройте приложение → «Соревнования» → «➕ Новое»
-2. Введите название, дату, место → «СОЗДАТЬ»
-3. Добавьте участников через «Персоны» → «➕ Новая персона»
-
-## 🔹 Зарегистрировать команду
-1. Меню «Регистрация» → выберите класс
-2. Введите фамилию:
-   - ✅ Нашлось → выберите из списка
-   - ❌ Нет → заполните прямо здесь:
-     • Фамилия
-     • Имя
-     • Дата рождения (ДД.ММ.ГГГГ)
-     > 💡 Поля «Отчество», «Телефон», «Позывной» скрыты. Нажмите «▸», чтобы заполнить сейчас, или сделайте это позже в полной карточке.
-3. Если участнику <18 лет:
-   - Приложение запросит ментора (≥18)
-   - ✅ Нашлось → выберите
-   - ❌ Нет → «➕ Быстрый ментор»: введите только Фамилию и Имя
-   > 📌 Ментор привязывается к участнику. Если он уже в команде — просто выберите его.
-4. Нажмите «СОХРАНИТЬ КОМАНДУ»
-
-## 🔹 Начать старты
-1. Меню «Старт» → «НАЧАТЬ СОРЕВНОВАНИЯ»
-2. Очередь чередуется (2-й → 3-й класс) автоматически
-3. Команда уходит по сигналу. Следующая появится сама
-
-## 🔹 Зафиксировать финиш
-1. Нажмите 🏁 в нижнем углу
-2. Отметьте галочками финишировавшие команды
-3. Нажмите «ПОДТВЕРДИТЬ»
-> ⏱️ Время фиксируется в момент открытия окна. Если опоздали — долгий тап по времени → введите верно.
-
-## 🔹 Заполнить путевой лист
-1. Карточка команды → 📄 (или меню «Путевые»)
-2. Для каждого КП: отметьте «Взят» / «Ошибка»
-3. Для технических КП: укажите время ожидания
-4. Введите пароль секретаря → «Карту заполнил»
-5. Введите пароль судьи → «Карту проверил»
-> 📌 После двойного подтверждения правки закрыты.
-> ⚠️ Если в настройках отключено подтверждение: сохранение идёт сразу. Будьте внимательны.
-
-## 🔹 Посмотреть итоги
-1. Меню «Итоги» → выберите класс
-2. Таблица: место, номер, баллы, время
-3. Команды с пометкой `ОБГ` идут в конце списка. Их результаты считаются автоматически.
-
----
-
-## ❓ Частые вопросы
-| Вопрос | Ответ |
-|--------|-------|
-| Команда не стартовала вовремя | Нажмите «ПРОПУСК» → команда перейдёт в конец очереди |
-| Ошиблись при вводе времени финиша | Долгий тап по времени → введите верно → сохраните |
-| Участник выбыл | Карточка команды → «🔄 Заменить» |
-| Приложение закрылось само | Откройте снова — таймер и данные восстановятся |
-| Нужно экспортировать результаты | Главный экран → «📤 Экспорт сейчас» → файл в «Документы» |
-
-## 🚫 Что нельзя делать
-- Не удаляйте приложение до финализации соревнования
-- Не меняйте время на устройстве во время старта
-- Не подтверждайте путевой лист, пока не сверили отметки с бумажным носителем
-
-## 🆘 Экстренная помощь
-- Сброс таймера: долгий тап по таймеру → пароль `1234`
-- Восстановление: «📥 Импорт» → выберите `autobackup.json`
-<<<конец файла
-
-docs/VALIDATION_RULES.md>>>
-# 🛡️ VALIDATION_RULES.md · Правила валидации данных
-**Дата:** 26.04.2026 | **Статус:** Рабочая | **Язык:** RU
-
-## 1. ВВОД И ФОРМАТИРОВАНИЕ
-| Поле | Правило | Где применяется |
-|------|---------|-----------------|
-| Фамилия, Имя, Отчество | 3 раздельных поля. Автокап первой буквы (Title Case), остальное строчные. Пробелы по краям обрезаются. | Регистрация персоны, инлайн-команда, быстрый ментор, редактирование |
-| Дата рождения | Маска `ДД.ММ.ГГГГ`. Только цифры + авто-точки. Точная проверка возраста (с учётом дня/месяца). | Все формы ввода возраста |
-| Телефон | Маска `+7 (XXX) XXX-XX-XX`. Валидация длины = 11 цифр. | Карточка персоны |
-| Поиск персон | Мин. 3 символа фамилии ИЛИ 4 цифры телефона. | Автоподстановка в команде, менторе, замене |
-
-## 2. ВОЗРАСТ И МЕНТОРЫ
-| Возраст участника | Требование | Флаг в БД |
-|-------------------|------------|-----------|
-| ≥18 лет | Ментор не требуется | `mentorId = null` |
-| 14–17 лет | Требуется ментор ≥18 + подтверждение | `mentorConfirmed = true` |
-| <14 лет | Ментор ≥18 + подтверждение + разрешение судьи | `mentorConfirmed = true`, `judgeApproved = true` |
-
-**Правила менторства:**
-- 1 ментор → N подопечных в рамках одного соревнования.
-- Ментор может входить в состав той же команды.
-- Быстрая форма: только `Фамилия` + `Имя`. `canBeMentor=true` ставится автоматически. Дата рождения заполняется позже.
-- В истории персоны: справка `[Соревнование] — ментор: [ФИО]`.
-
-## 3. СОСТАВ КОМАНДЫ И ОБГ
-- `min_team_size` читается из `competition.settings_json` (дефолт 2).
-- Старт блокируется, если `участников < min_team_size`.
-- Если `участников > min_team_size` → автоматическая метка `ОБГ`.
-- ОБГ сортируется **после** стандартных зачётов в итогах. Ручная корректировка не требуется.
-
-## 4. СТАТУСНЫЕ ПЕРЕХОДЫ (БЛОКИРОВКИ)
-| Действие | Условие | Результат |
-|----------|---------|-----------|
-| Старт | `статус = registered` И `участников ≥ min` И `менторы подтверждены` | ✅ `started` |
-| Финиш | `статус = started` | ✅ `finished` + фиксация времени |
-| Расформирование | `registered` | ✅ без пароля → `free_agent` |
-| Расформирование | `started` | ✅ пароль + причина → `registered` |
-| Расформирование | `finished / lost / disqualified` | ❌ Запрещено |
-| Смена класса | `started ≤5 мин` | ✅ пароль + штраф |
-| Смена класса | `started >5 мин / finished` | ❌ Только откат/дисквалификация |
-
-## 5. ПУТЕВОЙ ЛИСТ И ПОДТВЕРЖДЕНИЕ
-- **Настройки соревнования:**
-  - `Старший судья` (Да/Нет) → «Нет» только после пароля разработчика.
-  - `Секретарь` (Да/Нет) → отключение только после пароля судьи.
-- **Поведение:**
-  - Если любой флаг `Нет` → показывать `⚠️ Сохраняется без подтверждений — будьте внимательны`.
-  - Если оба `Да` → обязательный двойной ввод паролей. После → `checkpointsEntered = true`, режим `read-only`.
-  - `Взят + Ошибка` → вес = 0, отсечка учитывается в чистом времени.
-  - `Не взят` → вес = 0, отсечка не учитывается.
-  - Автопересчёт: если `статус = lost` И `чистое_время ≤ КВ` → `статус = finished`.
-
-## 6. ТЕХНИЧЕСКИЕ ОГРАНИЧЕНИЯ
-| Область | Правило |
-|---------|---------|
-| БД | `version++` строго при изменении любого `@Entity`. Порядок очистки: дети → родители. |
-| ID | Запрещён хардкод `1L`. Передача только через `SharedState` или `navArgument`. |
-| Insert | Всегда проверять `insert() != -1L`. При `-1L` → лог + возврат, без продолжения транзакции. |
-| UI | Мин. тап 48dp. Цвета только через `MaterialTheme.colorScheme` или явную проверку светлой/тёмной темы. |
-| Таймер | Фиксация финиша при открытии диалога. Восстановление: `System.currentTimeMillis() - startTimestamp` из `app_settings`. |
-
-## 7. ЧЕК-ЛИСТ ПЕРЕД РЕЛИЗОМ ЭКРАНА
-- [ ] Все поля ввода проверяются на пустоту/формат до вызова `suspend fun`
-- [ ] Возрастные флаги (`mentorConfirmed`, `judgeApproved`) обновляются реактивно
-- [ ] `min_team_size` берётся из `settings_json`, не захардкожен
-- [ ] Нет `Log.e` в release-сборке (использовать `Timber`)
-- [ ] Нет `Color(0xFF...)` без проверки темы
-- [ ] Версия БД соответствует схеме `AppDatabase.kt`
-- [ ] Тест на чистой БД: `uninstall` → `clean` → `run` → генерация → старт → финиш → итоги
 <<<конец файла
 
