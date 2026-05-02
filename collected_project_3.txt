@@ -59,6 +59,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.speleo.start.presentation.component.TitleCaseTextField
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.PhoneFormatter
+import com.speleo.start.util.StringExt
+import com.speleo.start.util.StringExt.normalizeName
+import com.speleo.start.util.normalizeName
 import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -111,7 +114,6 @@ fun PersonDetailScreen(
         }
     }
 
-    // Проверка частичной даты — подсвечивает красным при ЛЮБОЙ ошибке
     fun isDateError(date: String): Boolean {
         if (date.isBlank()) return false
         if (date.length < 10) {
@@ -129,7 +131,6 @@ fun PersonDetailScreen(
 
     val dateHasError = isDateError(birthDate)
 
-    // Форма валидна только если дата либо пустая, либо полностью корректная
     val isFormValid = lastName.isNotBlank() &&
             firstName.isNotBlank() &&
             !dateHasError &&
@@ -166,11 +167,16 @@ fun PersonDetailScreen(
                     } else {
                         IconButton(
                             onClick = {
+                                val normalizedLastName = lastName.normalizeName()
+                                val normalizedFirstName = firstName.normalizeName()
+                                val normalizedMiddleName = middleName.ifBlank { null }?.normalizeName()
+                                val normalizedNickname = nickname.ifBlank { null }?.normalizeName()
+
                                 vm.savePerson(
-                                    lastName = lastName,
-                                    firstName = firstName,
-                                    middleName = middleName.ifBlank { null },
-                                    nickname = nickname.ifBlank { null },
+                                    lastName = normalizedLastName,
+                                    firstName = normalizedFirstName,
+                                    middleName = normalizedMiddleName,
+                                    nickname = normalizedNickname,
                                     birthDate = birthDate.ifBlank { null },
                                     phone = phone.ifBlank { null },
                                     gender = gender,
@@ -242,7 +248,6 @@ fun PersonDetailScreen(
                 }
 
                 if (!isEditing) {
-                    // === РЕЖИМ ПРОСМОТРА ===
                     PersonFieldRO(label = "ФАМИЛИЯ", value = p.lastName)
                     PersonFieldRO(label = "ИМЯ", value = p.firstName)
                     PersonFieldRO(label = "ОТЧЕСТВО", value = p.middleName ?: "—")
@@ -357,8 +362,6 @@ fun PersonDetailScreen(
                         Text(if (p.blacklisted) "✅ УБРАТЬ ИЗ ЧЁРНОГО СПИСКА" else "🚫 ДОБАВИТЬ В ЧЁРНЫЙ СПИСОК")
                     }
                 } else {
-                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
-
                     TitleCaseTextField(
                         value = lastName,
                         onValueChange = { lastName = it },
@@ -391,7 +394,6 @@ fun PersonDetailScreen(
                         onNext = { focusManager.moveFocus(FocusDirection.Down) }
                     )
 
-                    // Поле даты рождения
                     var dateFieldState by remember { mutableStateOf(TextFieldValue(birthDate)) }
 
                     LaunchedEffect(birthDate) {
@@ -434,7 +436,6 @@ fun PersonDetailScreen(
                                 birthDate = formatted
                             }
 
-                            // АВТОПЕРЕХОД: всегда при 10 символах, независимо от валидности
                             if (formatted.length == 10) {
                                 focusManager.moveFocus(FocusDirection.Down)
                             }
@@ -880,6 +881,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.speleo.start.presentation.component.TitleCaseTextField
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.PhoneFormatter
+import com.speleo.start.util.normalizeName
 import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -900,7 +902,6 @@ fun PersonNewScreen(
     var phoneState by remember { mutableStateOf(TextFieldValue("")) }
     var gender by remember { mutableStateOf("male") }
 
-    // Проверка валидности даты — используем isRealDate вместо isValid
     val isDateValid = birthDate.isBlank() ||
             (birthDate.length == 10 && DateValidator.isRealDate(birthDate))
 
@@ -934,14 +935,13 @@ fun PersonNewScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Фамилия
             TitleCaseTextField(
                 value = lastName,
                 onValueChange = { lastName = it },
                 label = "Фамилия",
                 modifier = Modifier.fillMaxWidth()
             )
-            // Имя
+
             TitleCaseTextField(
                 value = firstName,
                 onValueChange = { firstName = it },
@@ -949,7 +949,6 @@ fun PersonNewScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Скрытые поля: Отчество + Позывной
             TextButton(onClick = { showExtraFields = !showExtraFields }) {
                 Text(if (showExtraFields) "▾ Дополнительно" else "▸ Дополнительно")
             }
@@ -971,7 +970,6 @@ fun PersonNewScreen(
                 }
             }
 
-            // Дата рождения
             if (!noBirthDate) {
                 DateOfBirthField(
                     value = birthDate,
@@ -1001,13 +999,11 @@ fun PersonNewScreen(
                 }
             }
 
-            // Чекбокс «Без даты рождения»
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = noBirthDate, onCheckedChange = { noBirthDate = it })
                 Text("Без даты рождения", fontSize = 14.sp)
             }
 
-            // Телефон
             OutlinedTextField(
                 value = phoneState,
                 onValueChange = { newVal ->
@@ -1022,7 +1018,6 @@ fun PersonNewScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
             )
 
-            // Пол
             Text("Пол", fontSize = 14.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("male" to "Мужской", "female" to "Женский").forEach { (v, l) ->
@@ -1030,14 +1025,18 @@ fun PersonNewScreen(
                 }
             }
 
-            // Кнопка сохранения — блокируется при некорректной дате
             Button(
                 onClick = {
+                    val normalizedLastName = lastName.normalizeName()
+                    val normalizedFirstName = firstName.normalizeName()
+                    val normalizedMiddleName = middleName.ifBlank { null }?.normalizeName()
+                    val normalizedNickname = nickname.ifBlank { null }?.normalizeName()
+
                     vm.savePerson(
-                        lastName = lastName,
-                        firstName = firstName,
-                        middleName = middleName.ifBlank { null },
-                        nickname = nickname.ifBlank { null },
+                        lastName = normalizedLastName,
+                        firstName = normalizedFirstName,
+                        middleName = normalizedMiddleName,
+                        nickname = normalizedNickname,
                         birthDate = if (noBirthDate) null else birthDate.ifBlank { null },
                         phone = phone.ifBlank { null },
                         gender = gender
@@ -1059,12 +1058,10 @@ fun DateOfBirthField(
     modifier: Modifier = Modifier,
     isError: Boolean = false
 ) {
-    // НЕ используем remember(value) — храним состояние отдельно
     var state by remember {
         mutableStateOf(TextFieldValue(value, TextRange(value.length)))
     }
 
-    // Синхронизация только извне
     LaunchedEffect(value) {
         if (state.text != value) {
             state = TextFieldValue(value, TextRange(value.length))
@@ -1076,14 +1073,12 @@ fun DateOfBirthField(
         onValueChange = { newVal ->
             val formatted = DateValidator.formatAsYouType(newVal.text)
 
-            // Если форматирование не изменило текст — просто обновляем
             if (formatted == newVal.text) {
                 state = newVal
                 if (formatted != value) onValueChange(formatted)
                 return@OutlinedTextField
             }
 
-            // Пересчитываем позицию курсора
             val oldCursor = newVal.selection.start
             val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
             val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)

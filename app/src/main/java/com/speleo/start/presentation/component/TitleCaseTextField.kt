@@ -60,17 +60,27 @@ fun TitleCaseTextField(
         value = textFieldValue,
         onValueChange = { newValue ->
             val raw = newValue.text
+            val oldLength = textFieldValue.text.length
+            val newLength = raw.length
 
-            // Пробел в конце → переход на следующее поле
-            if (raw.endsWith(" ") && raw.trim().isNotEmpty() && newValue.composition == null) {
+            // Проверяем: был ли добавлен пробел в конец?
+            val spaceAdded = newLength > oldLength && raw.last() == ' '
+
+            if (spaceAdded && raw.trim().isNotEmpty() && newValue.composition == null) {
+                // Убираем пробел, форматируем и переходим на следующий элемент
                 val trimmed = raw.trim().toTitleCase()
                 textFieldValue = TextFieldValue(trimmed, TextRange(trimmed.length))
                 onValueChange(trimmed)
-                onNext?.invoke() ?: focusManager.moveFocus(FocusDirection.Down)
+                // Переход на следующий элемент
+                if (onNext != null) {
+                    onNext()
+                } else {
+                    focusManager.moveFocus(FocusDirection.Down)
+                }
                 return@OutlinedTextField
             }
 
-            // Форматирование только когда IME закончил композицию
+            // Обычное форматирование (без пробела в конце)
             if (newValue.composition == null) {
                 val formatted = raw.toTitleCase()
 
@@ -107,7 +117,13 @@ fun TitleCaseTextField(
             imeAction = imeAction
         ),
         keyboardActions = KeyboardActions(
-            onNext = { onNext?.invoke() ?: focusManager.moveFocus(FocusDirection.Down) }
+            onNext = {
+                if (onNext != null) {
+                    onNext()
+                } else {
+                    focusManager.moveFocus(FocusDirection.Down)
+                }
+            }
         )
     )
 }

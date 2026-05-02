@@ -29,8 +29,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -67,6 +69,11 @@ import com.speleo.start.presentation.component.TitleCaseTextField
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.PhoneFormatter
 import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.Icon
+import com.speleo.start.R
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,6 +145,8 @@ fun TeamRegisterScreen(
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("🔍 Поиск участника ${emptyIndex + 1}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Spacer(modifier = Modifier.height(8.dp))
+
+                        // Поле поиска с кнопками внутри (trailingIcon)
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { vm.onSearchQueryChange(it) },
@@ -145,9 +154,73 @@ fun TeamRegisterScreen(
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, keyboardType = KeyboardType.Text),
-                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                            trailingIcon = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(end = 8.dp)  // 👈 Добавляем отступ справа
+                                ) {
+                                    // Кнопка "+" (создание)
+                                    IconButton(
+                                        onClick = {
+                                            if (searchQuery.isNotBlank()) {
+                                                members = members.toMutableList().also {
+                                                    it[emptyIndex] = members[emptyIndex].copy(
+                                                        isQuickCreate = true,
+                                                        quickLastName = searchQuery.trim()
+                                                    )
+                                                }
+                                                vm.onSearchQueryChange("")
+                                                focusManager.clearFocus()
+                                            }
+                                        },
+                                        enabled = searchQuery.isNotBlank(),
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .background(Color(0xFF4CAF50).copy(alpha = 0.4f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_action_add),
+                                                contentDescription = "Добавить",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Кнопка "✖" (очистка)
+                                    if (searchQuery.isNotBlank()) {
+                                        IconButton(
+                                            onClick = { vm.onSearchQueryChange("") },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .background(Color(0xFFF44336).copy(alpha = 0.4f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_action_clear),
+                                                    contentDescription = "Очистить",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         )
+
                         Spacer(modifier = Modifier.height(8.dp))
+
+                        // Результаты поиска
                         AnimatedVisibility(visible = searchResults.isNotEmpty()) {
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 searchResults.forEach { person ->
@@ -170,19 +243,40 @@ fun TeamRegisterScreen(
                                 }
                             }
                         }
+
+
+
+                        // Сообщение "ничего не найдено" с кнопкой создания
                         AnimatedVisibility(visible = searchQuery.length >= 2 && searchResults.isEmpty()) {
                             Column {
-                                Text("Ничего не найдено", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 4.dp))
+                                Text(
+                                    "Ничего не найдено",
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
                                 Button(
                                     onClick = {
                                         members = members.toMutableList().also {
-                                            it[emptyIndex] = members[emptyIndex].copy(isQuickCreate = true, quickLastName = searchQuery)
+                                            it[emptyIndex] = members[emptyIndex].copy(
+                                                isQuickCreate = true,
+                                                quickLastName = searchQuery.trim()
+                                            )
                                         }
                                         vm.onSearchQueryChange("")
                                         focusManager.clearFocus()
                                     },
                                     modifier = Modifier.fillMaxWidth()
-                                ) { Text("➕ Создать: $searchQuery") }
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_action_add),
+                                        contentDescription = "Добавить",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color(0xFF4CAF50).copy(alpha = 0.8f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Создать: ${searchQuery.trim()}")
+                                }
                             }
                         }
                     }
@@ -204,8 +298,17 @@ fun TeamRegisterScreen(
             }
 
             if (members.size < 6) {
-                OutlinedButton(onClick = { members = members + MemberDraft() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("➕ Добавить участника")
+                OutlinedButton(
+                    onClick = { members = members + MemberDraft() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_action_add),
+                        contentDescription = "Добавить",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Добавить участника")
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -268,15 +371,40 @@ fun TeamRegisterScreen(
                     }
                     if (mentorResults.isEmpty()) {
                         Spacer(modifier = Modifier.height(12.dp))
+
                         var qLast by remember { mutableStateOf("") }
                         var qFirst by remember { mutableStateOf("") }
-                        TitleCaseTextField(value = qLast, onValueChange = { qLast = it }, label = "Фамилия ментора", modifier = Modifier.fillMaxWidth())
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TitleCaseTextField(value = qFirst, onValueChange = { qFirst = it }, label = "Имя ментора", modifier = Modifier.fillMaxWidth())
+                        val focusManager = LocalFocusManager.current
+
+                        TitleCaseTextField(
+                            value = qLast,
+                            onValueChange = { qLast = it },
+                            label = "Фамилия ментора",
+                            modifier = Modifier.fillMaxWidth(),
+                            imeAction = ImeAction.Next,
+                            onNext = {
+                                // Пробел или Enter → переход на поле "Имя ментора"
+                                focusManager.moveFocus(FocusDirection.Down)
+                            }
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
+
+                        TitleCaseTextField(
+                            value = qFirst,
+                            onValueChange = { qFirst = it },
+                            label = "Имя ментора",
+                            modifier = Modifier.fillMaxWidth(),
+                            imeAction = ImeAction.Done,
+                            onNext = {
+                                // Пробел или Enter → убираем клавиатуру
+                                focusManager.clearFocus()
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
                         Button(
                             onClick = {
-                                if (qLast.isNotBlank()) {
+                                if (qLast.isNotBlank() && qFirst.isNotBlank()) {
                                     vm.createQuickMentor(lastName = qLast, firstName = qFirst) { newId ->
                                         vm.getPersonById(newId) { person ->
                                             person?.let {
@@ -286,12 +414,16 @@ fun TeamRegisterScreen(
                                             }
                                         }
                                         showMentorPickerFor = null
+                                        mentorSearchQuery = ""
+                                        vm.onMentorSearchQueryChange("")
                                     }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = qLast.isNotBlank()
-                        ) { Text("➕ СОЗДАТЬ И ПРИВЯЗАТЬ") }
+                            enabled = qLast.isNotBlank() && qFirst.isNotBlank()
+                        ) {
+                            Text("➕ СОЗДАТЬ И ПРИВЯЗАТЬ")
+                        }
                     }
                 }
             },
@@ -419,20 +551,48 @@ private fun QuickCreateForm(
     val age = if (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate)) DateValidator.calculateAge(member.quickBirthDate) else null
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        TitleCaseTextField(value = member.quickLastName, onValueChange = { onUpdate(member.copy(quickLastName = it)) }, label = "Фамилия", modifier = Modifier.fillMaxWidth(), onNext = { focusManager.moveFocus(FocusDirection.Down) })
-        TitleCaseTextField(value = member.quickFirstName, onValueChange = { onUpdate(member.copy(quickFirstName = it)) }, label = "Имя", modifier = Modifier.fillMaxWidth(), onNext = { focusManager.moveFocus(FocusDirection.Down) })
-        TextButton(onClick = { showExtra = !showExtra }, contentPadding = PaddingValues(vertical = 0.dp)) { Text(if (showExtra) "▾ Доп." else "▸ Доп.", fontSize = 12.sp) }
-        AnimatedVisibility(visible = showExtra) {
-            TitleCaseTextField(value = member.quickMiddleName, onValueChange = { onUpdate(member.copy(quickMiddleName = it)) }, label = "Отчество", modifier = Modifier.fillMaxWidth())
+        TitleCaseTextField(
+            value = member.quickLastName,
+            onValueChange = { onUpdate(member.copy(quickLastName = it)) },
+            label = "Фамилия",
+            modifier = Modifier.fillMaxWidth(),
+            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+        )
+        TitleCaseTextField(
+            value = member.quickFirstName,
+            onValueChange = { onUpdate(member.copy(quickFirstName = it)) },
+            label = "Имя",
+            modifier = Modifier.fillMaxWidth(),
+            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+        )
+
+        TextButton(
+            onClick = { showExtra = !showExtra },
+            contentPadding = PaddingValues(vertical = 0.dp)
+        ) {
+            Text(if (showExtra) "▾ Доп." else "▸ Доп.", fontSize = 12.sp)
         }
 
-        // === ДАТА РОЖДЕНИЯ (ИСПРАВЛЕННЫЙ КУРСОР) ===
-        var dateState by remember { mutableStateOf(TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))) }
+        AnimatedVisibility(visible = showExtra) {
+            TitleCaseTextField(
+                value = member.quickMiddleName,
+                onValueChange = { onUpdate(member.copy(quickMiddleName = it)) },
+                label = "Отчество",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Дата рождения
+        var dateState by remember {
+            mutableStateOf(TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length)))
+        }
+
         LaunchedEffect(member.quickBirthDate) {
             if (dateState.text != member.quickBirthDate) {
                 dateState = TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))
             }
         }
+
         OutlinedTextField(
             value = dateState,
             onValueChange = { newVal ->
@@ -444,7 +604,6 @@ private fun QuickCreateForm(
                         append(digits[i])
                     }
                 }
-                // 👇 Исправленный пересчёт курсора с учётом авто-точек
                 val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
                 val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
                 val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
@@ -454,48 +613,90 @@ private fun QuickCreateForm(
                 if (formatted.length == 10) focusManager.moveFocus(FocusDirection.Down)
             },
             label = { Text(if (dateHasError) "Некорректная дата" else "Дата рождения") },
-            isError = dateHasError, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            isError = dateHasError,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
         )
-        if (dateHasError) Text("Некорректная дата", color = Color(0xFFD32F2F), fontSize = 11.sp, modifier = Modifier.padding(start = 16.dp))
-        else if (age != null) {
-            val color = when { age < 14 -> Color(0xFFD32F2F); age in 14..17 -> Color(0xFFFF8C00); age > 70 -> Color(0xFFFF8C00); else -> Color(0xFF00A86B) }
+
+        if (dateHasError) {
+            Text("Некорректная дата", color = Color(0xFFD32F2F), fontSize = 11.sp, modifier = Modifier.padding(start = 16.dp))
+        } else if (age != null) {
+            val color = when {
+                age < 14 -> Color(0xFFD32F2F)
+                age in 14..17 -> Color(0xFFFF8C00)
+                age > 70 -> Color(0xFFFF8C00)
+                else -> Color(0xFF00A86B)
+            }
             Text("Возраст: $age лет", color = color, fontSize = 12.sp)
         }
 
-        var phoneState by remember { mutableStateOf(TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length))) }
-        LaunchedEffect(member.quickPhone) { if (phoneState.text != member.quickPhone) phoneState = TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length)) }
-        OutlinedTextField(value = phoneState, onValueChange = { newVal ->
-            val digits = newVal.text.filter { it.isDigit() }
-            val formatted = PhoneFormatter.formatAsYouType(digits)
-            phoneState = TextFieldValue(formatted, TextRange(formatted.length))
-            onUpdate(member.copy(quickPhone = formatted))
-        }, label = { Text("Телефон") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+        // Телефон
+        var phoneState by remember {
+            mutableStateOf(TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length)))
+        }
 
+        LaunchedEffect(member.quickPhone) {
+            if (phoneState.text != member.quickPhone) {
+                phoneState = TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length))
+            }
+        }
+
+        OutlinedTextField(
+            value = phoneState,
+            onValueChange = { newVal ->
+                val digits = newVal.text.filter { it.isDigit() }
+                val formatted = PhoneFormatter.formatAsYouType(digits)
+                phoneState = TextFieldValue(formatted, TextRange(formatted.length))
+                onUpdate(member.copy(quickPhone = formatted))
+            },
+            label = { Text("Телефон") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+        )
+
+        // Пол
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("male" to "М", "female" to "Ж").forEach { (v, l) -> FilterChip(selected = member.quickGender == v, onClick = { onUpdate(member.copy(quickGender = v)) }, label = { Text(l, fontSize = 12.sp) }) }
+            listOf("male" to "М", "female" to "Ж").forEach { (v, l) ->
+                FilterChip(
+                    selected = member.quickGender == v,
+                    onClick = { onUpdate(member.copy(quickGender = v)) },
+                    label = { Text(l, fontSize = 12.sp) }
+                )
+            }
         }
 
         val canSavePerson = member.quickLastName.isNotBlank() && member.quickFirstName.isNotBlank() && isDateValid
-        Button(onClick = {
-            vm.createQuickPerson(
-                lastName = member.quickLastName, firstName = member.quickFirstName, middleName = member.quickMiddleName.ifBlank { null },
-                birthDate = member.quickBirthDate.ifBlank { null }, phone = member.quickPhone.ifBlank { null }, gender = member.quickGender
-            ) { savedId ->
-                vm.getPersonById(savedId) { person ->
-                    person?.let {
-                        // 👇 КЛЮЧЕВОЙ ФИКС: обновляем ageGroup при сохранении!
-                        onUpdate(member.copy(
-                            person = it,
-                            isQuickCreate = false,
-                            ageGroup = calculateAgeGroup(it.birthDate)
-                        ))
-                        val pAge = DateValidator.calculateAge(it.birthDate)
-                        if (pAge != null && pAge < 18) onAutoOpenMentor()
+
+        Button(
+            onClick = {
+                vm.createQuickPerson(
+                    lastName = member.quickLastName,
+                    firstName = member.quickFirstName,
+                    middleName = member.quickMiddleName.ifBlank { null },
+                    birthDate = member.quickBirthDate.ifBlank { null },
+                    phone = member.quickPhone.ifBlank { null },
+                    gender = member.quickGender
+                ) { savedId ->
+                    vm.getPersonById(savedId) { person ->
+                        person?.let {
+                            onUpdate(member.copy(
+                                person = it,
+                                isQuickCreate = false,
+                                ageGroup = calculateAgeGroup(it.birthDate)
+                            ))
+                            val pAge = DateValidator.calculateAge(it.birthDate)
+                            if (pAge != null && pAge < 18) onAutoOpenMentor()
+                        }
                     }
                 }
-            }
-        }, modifier = Modifier.fillMaxWidth(), enabled = canSavePerson) { Text("💾 СОХРАНИТЬ", fontSize = 13.sp) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = canSavePerson
+        ) {
+            Text("💾 СОХРАНИТЬ", fontSize = 13.sp)
+        }
     }
 }
 

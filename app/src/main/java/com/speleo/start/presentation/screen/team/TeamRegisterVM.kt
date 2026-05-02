@@ -9,6 +9,7 @@ import com.speleo.start.data.repository.ParticipantRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
 import com.speleo.start.util.DateValidator
+import com.speleo.start.util.normalizeName
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,30 +118,58 @@ class TeamRegisterVM @Inject constructor(
 
     fun createQuickMentor(lastName: String, firstName: String, onCreated: (Long) -> Unit) {
         viewModelScope.launch {
+            // FIX: Имя обязательно для ментора
+            if (firstName.isBlank()) {
+                _event.emit(UiEvent.ShowMessage("Введите имя ментора"))
+                return@launch
+            }
+
+            val normalizedLastName = lastName.normalizeName()
+            val normalizedFirstName = firstName.normalizeName()
+
             val id = personRepo.createPerson(
-                lastName = lastName, firstName = firstName.ifBlank { "Ментор" }, birthDate = null, gender = null
+                lastName = normalizedLastName,
+                firstName = normalizedFirstName,
+                birthDate = null,
+                gender = null
             )
             if (id != -1L) {
                 _event.emit(UiEvent.ShowMessage("Ментор создан"))
                 onCreated(id)
-            } else _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+            }
         }
     }
 
     fun createQuickPerson(
-        lastName: String, firstName: String, middleName: String?,
-        birthDate: String?, phone: String?, gender: String?,
+        lastName: String,
+        firstName: String,
+        middleName: String?,
+        birthDate: String?,
+        phone: String?,
+        gender: String?,
         onCreated: (Long) -> Unit
     ) {
         viewModelScope.launch {
+            val normalizedLastName = lastName.normalizeName()
+            val normalizedFirstName = firstName.normalizeName()
+            val normalizedMiddleName = middleName?.normalizeName()
+
             val id = personRepo.createPerson(
-                lastName = lastName, firstName = firstName, middleName = middleName,
-                birthDate = birthDate, phone = phone, gender = gender
+                lastName = normalizedLastName,
+                firstName = normalizedFirstName,
+                middleName = normalizedMiddleName,
+                birthDate = birthDate,
+                phone = phone,
+                gender = gender
             )
             if (id != -1L) {
                 _event.emit(UiEvent.ShowMessage("Персона создана"))
                 onCreated(id)
-            } else _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+            }
         }
     }
 
@@ -154,10 +183,14 @@ class TeamRegisterVM @Inject constructor(
 
             val resolvedMembers = members.map { draft ->
                 if (draft.isQuickCreate) {
+                    val normalizedLastName = draft.quickLastName.normalizeName()
+                    val normalizedFirstName = draft.quickFirstName.normalizeName()
+                    val normalizedMiddleName = if (draft.quickMiddleName.isNotBlank()) draft.quickMiddleName.normalizeName() else null
+
                     val personId = personRepo.createPerson(
-                        lastName = draft.quickLastName,
-                        firstName = draft.quickFirstName,
-                        middleName = draft.quickMiddleName.ifBlank { null },
+                        lastName = normalizedLastName,
+                        firstName = normalizedFirstName,
+                        middleName = normalizedMiddleName,
                         birthDate = draft.quickBirthDate.ifBlank { null },
                         phone = draft.quickPhone.ifBlank { null },
                         gender = draft.quickGender

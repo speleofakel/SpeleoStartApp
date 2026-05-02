@@ -58,6 +58,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.speleo.start.presentation.component.TitleCaseTextField
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.PhoneFormatter
+import com.speleo.start.util.StringExt
+import com.speleo.start.util.StringExt.normalizeName
+import com.speleo.start.util.normalizeName
 import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,7 +113,6 @@ fun PersonDetailScreen(
         }
     }
 
-    // Проверка частичной даты — подсвечивает красным при ЛЮБОЙ ошибке
     fun isDateError(date: String): Boolean {
         if (date.isBlank()) return false
         if (date.length < 10) {
@@ -128,7 +130,6 @@ fun PersonDetailScreen(
 
     val dateHasError = isDateError(birthDate)
 
-    // Форма валидна только если дата либо пустая, либо полностью корректная
     val isFormValid = lastName.isNotBlank() &&
             firstName.isNotBlank() &&
             !dateHasError &&
@@ -165,11 +166,16 @@ fun PersonDetailScreen(
                     } else {
                         IconButton(
                             onClick = {
+                                val normalizedLastName = lastName.normalizeName()
+                                val normalizedFirstName = firstName.normalizeName()
+                                val normalizedMiddleName = middleName.ifBlank { null }?.normalizeName()
+                                val normalizedNickname = nickname.ifBlank { null }?.normalizeName()
+
                                 vm.savePerson(
-                                    lastName = lastName,
-                                    firstName = firstName,
-                                    middleName = middleName.ifBlank { null },
-                                    nickname = nickname.ifBlank { null },
+                                    lastName = normalizedLastName,
+                                    firstName = normalizedFirstName,
+                                    middleName = normalizedMiddleName,
+                                    nickname = normalizedNickname,
                                     birthDate = birthDate.ifBlank { null },
                                     phone = phone.ifBlank { null },
                                     gender = gender,
@@ -241,7 +247,6 @@ fun PersonDetailScreen(
                 }
 
                 if (!isEditing) {
-                    // === РЕЖИМ ПРОСМОТРА ===
                     PersonFieldRO(label = "ФАМИЛИЯ", value = p.lastName)
                     PersonFieldRO(label = "ИМЯ", value = p.firstName)
                     PersonFieldRO(label = "ОТЧЕСТВО", value = p.middleName ?: "—")
@@ -356,8 +361,6 @@ fun PersonDetailScreen(
                         Text(if (p.blacklisted) "✅ УБРАТЬ ИЗ ЧЁРНОГО СПИСКА" else "🚫 ДОБАВИТЬ В ЧЁРНЫЙ СПИСОК")
                     }
                 } else {
-                    // === РЕЖИМ РЕДАКТИРОВАНИЯ ===
-
                     TitleCaseTextField(
                         value = lastName,
                         onValueChange = { lastName = it },
@@ -390,7 +393,6 @@ fun PersonDetailScreen(
                         onNext = { focusManager.moveFocus(FocusDirection.Down) }
                     )
 
-                    // Поле даты рождения
                     var dateFieldState by remember { mutableStateOf(TextFieldValue(birthDate)) }
 
                     LaunchedEffect(birthDate) {
@@ -433,7 +435,6 @@ fun PersonDetailScreen(
                                 birthDate = formatted
                             }
 
-                            // АВТОПЕРЕХОД: всегда при 10 символах, независимо от валидности
                             if (formatted.length == 10) {
                                 focusManager.moveFocus(FocusDirection.Down)
                             }
