@@ -16,10 +16,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,8 +48,26 @@ fun CompetitionNewScreen(
     var place by remember { mutableStateOf("") }
     var discipline by remember { mutableStateOf("underground") }
     var system by remember { mutableStateOf("") }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        vm.event.collectLatest { event ->
+            when (event) {
+                is CompetitionNewVM.UiEvent.CompetitionCreated -> {
+                    snackbarHostState.showSnackbar(
+                        "✅ Соревнование «${event.name}» создано и активировано"
+                    )
+                    onSaved()
+                }
+                is CompetitionNewVM.UiEvent.ShowError -> {
+                    snackbarHostState.showSnackbar(event.message)
+                }
+            }
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Новое соревнование") },
@@ -98,11 +120,13 @@ fun CompetitionNewScreen(
             Spacer(modifier = Modifier.height(8.dp))
             Button(
                 onClick = {
-                    vm.saveCompetition(name, shortName, date, place, discipline, system.ifBlank { null }) { onSaved() }
+                    if (name.isNotBlank() && date.isNotBlank() && place.isNotBlank()) {
+                        vm.saveCompetition(name, shortName, date, place, discipline, system.ifBlank { null }) { }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = name.isNotBlank() && date.isNotBlank() && place.isNotBlank()
-            ) { Text("СОЗДАТЬ") }
+            ) { Text("СОЗДАТЬ И АКТИВИРОВАТЬ") }
         }
     }
 }

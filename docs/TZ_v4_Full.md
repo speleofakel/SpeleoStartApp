@@ -108,7 +108,7 @@ JSON с параметрами: интервал, КВ, КП, кастомные
 - `check_mentor_age` — R4
 - `prevent_edit_confirmed_route_card` — R5
 
-### Версия БД: 5
+### Версия БД: 7
 
 ---
 

@@ -14,10 +14,13 @@
 .externalNativeBuild
 .cxx
 local.properties
-/collect_project_files.py
-/vector_20260501_1_1.txt
-/vector_collect_project_files.py
-
+/build
+/app/build
+.idea
+*.ktx
+*.hprof
+/ksp
+/generated
 <<<конец файла
 
 build.gradle.kts>>>
@@ -110,7 +113,7 @@ include(":app")
 <<<конец файла
 
 .gradle/config.properties>>>
-#Thu Apr 30 23:10:32 MSK 2026
+#Sun May 03 15:07:32 MSK 2026
 java.home=D\:\\Program Files\\Android\\Android Studio\\jbr
 
 <<<конец файла
@@ -124,7 +127,7 @@ java.home=D\:\\Program Files\\Android\\Android Studio\\jbr
 <<<конец файла
 
 .gradle/buildOutputCleanup/cache.properties>>>
-#Thu Apr 30 23:12:38 MSK 2026
+#Sun May 03 15:08:10 MSK 2026
 gradle.version=8.5
 
 <<<конец файла
@@ -138,8 +141,6 @@ app/.gitignore>>>
 <<<конец файла
 
 app/build.gradle.kts>>>
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -159,6 +160,13 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Добавьте это для KSP
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments += mapOf("room.incremental" to "true")
+            }
+        }
     }
 
     buildTypes {
@@ -188,7 +196,7 @@ android {
 
     kotlin {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
         }
     }
 
@@ -376,10 +384,24 @@ fun PersonSearchDialog(
     onPersonSelected: (PersonEntity) -> Unit,
     onQuickCreate: ((String) -> Unit)? = null,
     onDismiss: () -> Unit,
+    filterForMentors: Boolean = false, // Новый параметр
     vm: TeamRegisterVM = hiltViewModel()
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val searchResults by vm.searchResults.collectAsStateWithLifecycle()
+
+    // Фильтруем результаты, если нужны только менторы (возраст ≥ 18)
+    val filteredResults = remember(searchResults, filterForMentors) {
+        if (filterForMentors) {
+            searchResults.filter { person ->
+                val age = DateValidator.calculateAge(person.birthDate)
+                age != null && age >= 18
+            }
+        } else {
+            searchResults
+        }
+    }
+
     var showQuickCreateForm by remember { mutableStateOf(false) }
     var quickLastName by remember { mutableStateOf("") }
     var quickFirstName by remember { mutableStateOf("") }
@@ -458,10 +480,10 @@ fun PersonSearchDialog(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (searchQuery.length >= 2 && searchResults.isEmpty()) {
+                    if (searchQuery.length >= 2 && filteredResults.isEmpty()) {
                         Column {
                             Text(
-                                "Ничего не найдено",
+                                text = if (filterForMentors) "Менторы не найдены" else "Ничего не найдено",
                                 modifier = Modifier.padding(16.dp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -476,7 +498,7 @@ fun PersonSearchDialog(
                         }
                     } else {
                         LazyColumn {
-                            items(searchResults) { person ->
+                            items(filteredResults) { person ->
                                 PersonSearchResultItem(
                                     person = person,
                                     onClick = { onPersonSelected(person) }
@@ -557,6 +579,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.speleo.start.presentation.Screen
 import com.speleo.start.presentation.SharedState
+import com.speleo.start.presentation.screen.checkpoints.CheckpointListScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionListScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionNewScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionSettingsScreen
@@ -564,8 +587,10 @@ import com.speleo.start.presentation.screen.finish.FinishScreen
 import com.speleo.start.presentation.screen.home.HomeScreen
 import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 import com.speleo.start.presentation.screen.persons.PersonListScreen
+import com.speleo.start.presentation.screen.persons.PersonNewScreen
 import com.speleo.start.presentation.screen.results.ResultsScreen
 import com.speleo.start.presentation.screen.routecard.RouteCardScreen
+import com.speleo.start.presentation.screen.settings.SettingsScreen
 import com.speleo.start.presentation.screen.start.StartScreen
 import com.speleo.start.presentation.screen.team.TeamRegisterScreen
 import com.speleo.start.presentation.screen.teamcard.TeamCardScreen
@@ -576,20 +601,31 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    @Inject lateinit var sharedState: SharedState
+    @Inject
+    lateinit var sharedState: SharedState
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             SpeleoStartTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     val navController = rememberNavController()
-                    val teamId by sharedState.selectedTeamId.collectAsStateWithLifecycle()
 
-                    NavHost(navController = navController, startDestination = Screen.Home.route) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = Screen.Home.route
+                    ) {
                         composable(Screen.Home.route) {
-                            HomeScreen(onNavigate = { screen -> navController.navigate(screen.route) })
+                            HomeScreen(
+                                onNavigate = { screen ->
+                                    navController.navigate(screen.route)
+                                }
+                            )
                         }
+
                         composable(Screen.PersonDetail.route) { backStackEntry ->
                             val personId = backStackEntry.arguments?.getString("personId")?.toLongOrNull() ?: -1L
                             PersonDetailScreen(
@@ -597,13 +633,16 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Competitions.route) {
                             CompetitionListScreen(
                                 onBack = { navController.popBackStack() },
                                 onCreateNew = { navController.navigate(Screen.CreateCompetition.route) },
-                                onSettings = { cid -> navController.navigate(Screen.CompetitionSettings.pass(cid)) }
+                                onSettings = { cid -> navController.navigate(Screen.CompetitionSettings.pass(cid)) },
+                                onCompetitionSelected = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.CreateCompetition.route) {
                             CompetitionNewScreen(
                                 onBack = { navController.popBackStack() },
@@ -622,16 +661,18 @@ class MainActivity : ComponentActivity() {
                                 onCheckpoints = { cid -> navController.navigate(Screen.Checkpoints.pass(cid)) }
                             )
                         }
+
                         composable(
                             route = Screen.Checkpoints.route,
                             arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
                         ) { backStackEntry ->
                             val competitionId = backStackEntry.arguments?.getLong("competitionId") ?: return@composable
-                            com.speleo.start.presentation.screen.checkpoints.CheckpointListScreen(
+                            CheckpointListScreen(
                                 competitionId = competitionId,
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Persons.route) {
                             PersonListScreen(
                                 onBack = { navController.popBackStack() },
@@ -641,12 +682,14 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+
                         composable(Screen.PersonNew.route) {
-                            com.speleo.start.presentation.screen.persons.PersonNewScreen(
+                            PersonNewScreen(
                                 onBack = { navController.popBackStack() },
                                 onSaved = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Register.route) {
                             TeamRegisterScreen(
                                 onBack = { navController.popBackStack() },
@@ -657,21 +700,39 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+
                         composable(Screen.Start.route) {
-                            StartScreen(onBack = { navController.popBackStack() })
+                            StartScreen(
+                                onBack = { navController.popBackStack() },
+                                onNavigateToCompetitions = { navController.navigate(Screen.Competitions.route) },
+                                onNavigateToTeamCard = { teamId ->
+                                    navController.navigate(Screen.TeamCard.pass(teamId))
+                                },
+                                onNavigateToFinish = { navController.navigate(Screen.Finish.route) }
+                            )
                         }
+
                         composable(Screen.Finish.route) {
-                            FinishScreen(onBack = { navController.popBackStack() })
+                            FinishScreen(
+                                onBack = { navController.popBackStack() }
+                            )
                         }
+
                         composable(Screen.TeamList.route) {
                             TeamListScreen(
                                 onBack = { navController.popBackStack() },
-                                onTeamClick = { tid -> navController.navigate(Screen.TeamCard.pass(tid)) }
+                                onTeamClick = { tid ->
+                                    navController.navigate(Screen.TeamCard.pass(tid))
+                                }
                             )
                         }
+
                         composable(Screen.Results.route) {
-                            ResultsScreen(onBack = { navController.popBackStack() })
+                            ResultsScreen(
+                                onBack = { navController.popBackStack() }
+                            )
                         }
+
                         composable(
                             route = Screen.RouteCardDetail.route,
                             arguments = listOf(navArgument("teamId") { type = NavType.LongType })
@@ -682,11 +743,13 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Settings.route) {
-                            com.speleo.start.presentation.screen.settings.SettingsScreen(
+                            SettingsScreen(
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(
                             route = Screen.TeamCard.route,
                             arguments = listOf(navArgument("teamId") { type = NavType.LongType })
@@ -795,78 +858,147 @@ class TestDataGenerator @Inject constructor(
             clearAll()
 
             db.withTransaction {
-                val compId = competitionDao.insert(
-                    CompetitionEntity(
-                        name = "Бяковские каменоломни 2026",
-                        shortName = "Бяки 2026",
-                        date = "13.12.2025",
-                        place = "Тульская обл., пос. Метростроевский",
-                        discipline = "underground",
-                        system = "Бяковская (Бяки)"
+                try {
+                    // 1. СОРЕВНОВАНИЕ
+                    val compId = competitionDao.insert(
+                        CompetitionEntity(
+                            name = "Бяковские каменоломни 2026",
+                            shortName = "Бяки 2026",
+                            date = "13.12.2025",
+                            place = "Тульская обл., пос. Метростроевский",
+                            discipline = "underground",
+                            system = "Бяковская (Бяки)",
+                            settingsJson = "{\"start_interval\":60,\"control_time_2\":90,\"control_time_3\":60,\"min_team_size\":2}"
+                        )
                     )
-                )
-                if (compId == -1L) {
-                    Log.e("GEN", "FAILED competition insert")
-                    return@withTransaction
-                }
+                    if (compId == -1L) {
+                        Log.e("TestDataGenerator", "❌ Не удалось создать соревнование")
+                        return@withTransaction
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано соревнование ID: $compId")
 
-                for (i in 1..12) {
-                    val cp = MasterRouteCardEntity(
-                        competitionId = compId, displayNumber = i,
-                        weight = 2 + random.nextInt(14),
-                        type = if (i % 4 == 0) "technical" else "normal",
-                        sortOrder = i,
-                        normativeSeconds = if (i % 4 == 0) 60 + random.nextInt(241) else 0,
-                        forClass2 = true, forClass3 = i <= 10,
-                        trackWaitTime = i % 4 == 0, trackExecutionTime = false,
-                        bonusPoints = 0
-                    )
-                    masterRouteCardDao.insert(cp)
-                }
+                    // 2. КОНТРОЛЬНЫЕ ПУНКТЫ
+                    for (i in 1..12) {
+                        val cp = MasterRouteCardEntity(
+                            competitionId = compId,
+                            displayNumber = i,
+                            weight = 2 + random.nextInt(14),
+                            type = if (i % 4 == 0) "technical" else "normal",
+                            sortOrder = i,
+                            normativeSeconds = if (i % 4 == 0) 60 + random.nextInt(241) else 0,
+                            forClass2 = true,
+                            forClass3 = i <= 10,
+                            trackWaitTime = i % 4 == 0,
+                            trackExecutionTime = false,
+                            bonusPoints = 0
+                        )
+                        masterRouteCardDao.insert(cp)
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано 12 КП")
 
-                val maleFirst = listOf("Александр","Дмитрий","Максим","Сергей","Андрей","Алексей","Иван","Пётр","Николай","Владимир")
-                val femaleFirst = listOf("Анна","Мария","Елена","Ольга","Татьяна","Наталья","Екатерина","Ирина","Светлана","Юлия")
-                val maleLast = listOf("Иванов","Петров","Сидоров","Смирнов","Кузнецов","Попов","Васильев","Михайлов","Новиков","Фёдоров")
-                val femaleLast = listOf("Иванова","Петрова","Сидорова","Смирнова","Кузнецова","Попова","Васильева","Михайлова","Новикова","Фёдорова")
-                val nicks = listOf("Геолог","Спелеолог","Фонарик","Компас","Штольня","Каска","Верёвка","Камень","ЛетучаяМышь","Подземка","Шахтёр","Рудокоп","Сталкер","Крот","Бункер","Каньон","Сапёр","Маяк","Азимут","Горизонт")
+                    // 3. ПЕРСОНЫ
+                    val maleFirst = listOf("Александр","Дмитрий","Максим","Сергей","Андрей","Алексей","Иван","Пётр","Николай","Владимир")
+                    val femaleFirst = listOf("Анна","Мария","Елена","Ольга","Татьяна","Наталья","Екатерина","Ирина","Светлана","Юлия")
+                    val maleLast = listOf("Иванов","Петров","Сидоров","Смирнов","Кузнецов","Попов","Васильев","Михайлов","Новиков","Фёдоров")
+                    val femaleLast = listOf("Иванова","Петрова","Сидорова","Смирнова","Кузнецова","Попова","Васильева","Михайлова","Новикова","Фёдорова")
+                    val nicks = listOf("Геолог","Спелеолог","Фонарик","Компас","Штольня","Каска","Верёвка","Камень","ЛетучаяМышь","Подземка","Шахтёр","Рудокоп","Сталкер","Крот","Бункер","Каньон","Сапёр","Маяк","Азимут","Горизонт")
 
-                val personIds = mutableListOf<Long>()
-                for (i in 0..19) {
-                    val isMale = i < 10
-                    val fn = if (isMale) maleFirst[i] else femaleFirst[i % 10]
-                    val ln = if (isMale) maleLast[i] else femaleLast[i % 10]
-                    val by = 2000 + (-20 + random.nextInt(32))
-                    val bm = 1 + random.nextInt(12)
-                    val bd = 1 + random.nextInt(28)
-                    val birth = "%02d.%02d.%04d".format(bd, bm, by)
-                    val phone = "+7 9%02d %03d-%02d-%02d".format(10+random.nextInt(90), 100+random.nextInt(900), 10+random.nextInt(90), 10+random.nextInt(90))
-                    val age = 2025 - by
-                    val pid = personDao.insert(PersonEntity(
-                        lastName = ln, firstName = fn, middleName = if(random.nextBoolean()) "${fn}ович" else null,
-                        nickname = nicks[i], birthDate = birth, phone = phone,
-                        gender = if(isMale) "male" else "female"
-                    ))
-                    if (pid > 0) personIds.add(pid)
-                }
+                    val personIds = mutableListOf<Long>()
+                    for (i in 0..19) {
+                        val isMale = i < 10
+                        val fn = if (isMale) maleFirst[i] else femaleFirst[i % 10]
+                        val ln = if (isMale) maleLast[i] else femaleLast[i % 10]
+                        val by = 2000 + (-20 + random.nextInt(32))
+                        val bm = 1 + random.nextInt(12)
+                        val bd = 1 + random.nextInt(28)
+                        val birth = "%02d.%02d.%04d".format(bd, bm, by)
+                        val phone = "+7 9%02d %03d-%02d-%02d".format(10+random.nextInt(90), 100+random.nextInt(900), 10+random.nextInt(90), 10+random.nextInt(90))
 
-                for (i in 0..4)
-                    if (i < personIds.size) mentorDao.insert(MentorEntity(personId = personIds[i]))
+                        val pid = personDao.insert(
+                            PersonEntity(
+                                lastName = ln,
+                                firstName = fn,
+                                middleName = if(random.nextBoolean()) "${fn}ович" else null,
+                                nickname = nicks[i % nicks.size],
+                                birthDate = birth,
+                                phone = phone,
+                                gender = if(isMale) "male" else "female"
+                            )
+                        )
+                        if (pid > 0) {
+                            personIds.add(pid)
+                        }
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано ${personIds.size} персон")
 
-                for (t in 1..6) {
-                    val tid = teamDao.insert(TeamEntity(competitionId = compId, teamNumber = t, className = "2",
-                        status = when(t){1,2->"registered";3,4->"started";5->"finished";6->"disqualified"; else->"registered"}, colorMark = "green"))
-                    val a=(t*2)%personIds.size; val b=(t*2+1)%personIds.size
-                    participantDao.insert(ParticipantEntity(teamId=tid, personId=personIds[a], role="captain", statusMember="active"))
-                    participantDao.insert(ParticipantEntity(teamId=tid, personId=personIds[b], role="member", statusMember="active"))
-                    if(t%2==1) participantDao.insert(ParticipantEntity(teamId=tid, personId=personIds[(t*2+2)%personIds.size], role="member", statusMember="active"))
-                }
+                    // 4. МЕНТОРЫ (первые 5 персон)
+                    for (i in 0..4) {
+                        if (i < personIds.size) {
+                            mentorDao.insert(MentorEntity(personId = personIds[i]))
+                        }
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано 5 менторов")
 
-                for (t in 1..4) {
-                    val tid = teamDao.insert(TeamEntity(competitionId = compId, teamNumber = t, className = "3",
-                        status = when(t){1->"registered";2->"started";3->"finished";4->"lost"; else->"registered"}, colorMark = "green"))
-                    val a=(t*2+10)%personIds.size; val b=(t*2+11)%personIds.size
-                    participantDao.insert(ParticipantEntity(teamId=tid, personId=personIds[a], role="captain", statusMember="active"))
-                    participantDao.insert(ParticipantEntity(teamId=tid, personId=personIds[b], role="member", statusMember="active"))
+                    // 5. КОМАНДЫ 2-го класса
+                    for (t in 1..6) {
+                        val tid = teamDao.insert(
+                            TeamEntity(
+                                competitionId = compId,
+                                teamNumber = t,
+                                className = "2",
+                                status = when(t){
+                                    1,2 -> "registered"
+                                    3,4 -> "started"
+                                    5 -> "finished"
+                                    6 -> "disqualified"
+                                    else -> "registered"
+                                },
+                                colorMark = "green"
+                            )
+                        )
+                        if (tid == -1L) continue
+
+                        val a = (t * 2) % personIds.size
+                        val b = (t * 2 + 1) % personIds.size
+                        // ИСПРАВЛЕНО: statusMember -> status
+                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
+                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
+                        if (t % 2 == 1 && t * 2 + 2 < personIds.size) {
+                            participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[(t * 2 + 2) % personIds.size], role = "member", status = "active"))
+                        }
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано 6 команд 2-го класса")
+
+                    // 6. КОМАНДЫ 3-го класса
+                    for (t in 1..4) {
+                        val tid = teamDao.insert(
+                            TeamEntity(
+                                competitionId = compId,
+                                teamNumber = t,
+                                className = "3",
+                                status = when(t){
+                                    1 -> "registered"
+                                    2 -> "started"
+                                    3 -> "finished"
+                                    4 -> "lost"
+                                    else -> "registered"
+                                },
+                                colorMark = "green"
+                            )
+                        )
+                        if (tid == -1L) continue
+
+                        val a = (t * 2 + 10) % personIds.size
+                        val b = (t * 2 + 11) % personIds.size
+                        // ИСПРАВЛЕНО: statusMember -> status
+                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
+                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано 4 команды 3-го класса")
+
+                    Log.d("TestDataGenerator", "🎉 Тестовые данные успешно сгенерированы!")
+                } catch (e: Exception) {
+                    Log.e("TestDataGenerator", "❌ Ошибка при генерации: ${e.message}", e)
                 }
             }
         }
@@ -874,16 +1006,23 @@ class TestDataGenerator @Inject constructor(
 
     suspend fun clearAll() {
         withContext(Dispatchers.IO) {
-            appSettingsDao.remove("competition_start_timestamp")
-            appSettingsDao.remove("competition_active")
+            try {
+                // Очищаем настройки таймера
+                appSettingsDao.remove("competition_start_timestamp")
+                appSettingsDao.remove("competition_active")
 
-            participantDao.deleteAll()
-            mentorDao.deleteAll()
-            masterRouteCardDao.deleteAll()
+                // Удаляем в правильном порядке (дети → родители)
+                participantDao.deleteAll()
+                mentorDao.deleteAll()
+                masterRouteCardDao.deleteAll()
+                teamDao.deleteAll()
+                personDao.deleteAll()
+                competitionDao.deleteAll()
 
-            teamDao.deleteAll()
-            personDao.deleteAll()
-            competitionDao.deleteAll()
+                Log.d("TestDataGenerator", "✅ Все данные очищены")
+            } catch (e: Exception) {
+                Log.e("TestDataGenerator", "❌ Ошибка при очистке: ${e.message}", e)
+            }
         }
     }
 }
@@ -930,7 +1069,7 @@ import com.speleo.start.data.local.entity.TeamRouteCardEntity
         TeamRouteCardEntity::class,
         AppSettingsEntity::class
     ],
-    version = 7,
+    version = 8,  // ИЗМЕНЕНО: 7 → 8
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -985,6 +1124,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // НОВАЯ МИГРАЦИЯ: 7 → 8
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Добавляем столбец trackWaitTime в master_route_card
+                db.execSQL("ALTER TABLE master_route_card ADD COLUMN trackWaitTime INTEGER NOT NULL DEFAULT 0")
+                // Добавляем столбец trackExecutionTime в master_route_card
+                db.execSQL("ALTER TABLE master_route_card ADD COLUMN trackExecutionTime INTEGER NOT NULL DEFAULT 0")
+                // Добавляем столбец bonusPoints в master_route_card
+                db.execSQL("ALTER TABLE master_route_card ADD COLUMN bonusPoints INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -992,8 +1143,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "speleo_start.db"
                 )
-                    .addMigrations(MIGRATION_5_6)
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_5_6, MIGRATION_7_8)  // ДОБАВЛЕНА новая миграция
+                    .fallbackToDestructiveMigration()  // Для отладки можно оставить, но в релизе убрать
                     .build()
                 INSTANCE = instance
                 instance
@@ -1051,6 +1202,9 @@ package com.speleo.start.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -1066,6 +1220,21 @@ class PreferencesManager @Inject constructor(
 
     val hasActiveCompetition: Boolean
         get() = activeCompetitionId != -1L
+
+    // НОВЫЙ МЕТОД: Flow для реактивного отслеживания изменений activeCompetitionId
+    val activeCompetitionFlow: Flow<Long> = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "active_competition_id") {
+                trySend(prefs.getLong(key, -1))
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        // Отправляем текущее значение при подписке
+        trySend(activeCompetitionId)
+        awaitClose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
 }
 <<<конец файла
 
@@ -1226,6 +1395,7 @@ package com.speleo.start.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.speleo.start.data.local.entity.ParticipantEntity
@@ -1233,39 +1403,34 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ParticipantDao {
-    @Query("SELECT * FROM participants WHERE teamId = :teamId AND statusMember = 'active'")
-    fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
 
+    @Query("SELECT * FROM participants WHERE teamId = :teamId")
+    fun getParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
+
+    // Все участники команды (включая replaced, free_agent)
     @Query("SELECT * FROM participants WHERE teamId = :teamId")
     fun getAllParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
 
-    @Query("""
-        SELECT * FROM participants
-        WHERE statusMember = 'free_agent'
-        AND teamId IN (SELECT id FROM teams WHERE competitionId = :competitionId)
-    """)
-    fun getFreeAgents(competitionId: Long): Flow<List<ParticipantEntity>>
+    // Только активные участники команды
+    @Query("SELECT * FROM participants WHERE teamId = :teamId AND status = 'active'")
+    fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
+
+    @Query("SELECT * FROM participants WHERE personId = :personId")
+    fun getParticipantsByPerson(personId: Long): Flow<List<ParticipantEntity>>
 
     @Query("SELECT * FROM participants WHERE id = :id")
     suspend fun getParticipantById(id: Long): ParticipantEntity?
 
-    @Query("""
-        SELECT p.* FROM participants p
-        JOIN teams t ON p.teamId = t.id
-        WHERE p.personId = :personId 
-        AND t.competitionId = :competitionId 
-        AND p.statusMember = 'active'
-        LIMIT 1
-    """)
-    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity?
-
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(participant: ParticipantEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(participants: List<ParticipantEntity>): List<Long>
 
     @Update
     suspend fun update(participant: ParticipantEntity)
 
-    @Query("UPDATE participants SET statusMember = :status WHERE id = :id")
+    @Query("UPDATE participants SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: Long, status: String)
 
     @Query("UPDATE participants SET mentorId = :mentorId, mentorConfirmed = :confirmed WHERE id = :id")
@@ -1274,22 +1439,24 @@ interface ParticipantDao {
     @Query("DELETE FROM participants WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("DELETE FROM participants WHERE teamId = :teamId")
+    suspend fun deleteByTeam(teamId: Long)
+
     @Query("DELETE FROM participants")
     suspend fun deleteAll()
 
+    @Query("SELECT COUNT(*) FROM participants WHERE teamId = :teamId AND status = 'active'")
+    suspend fun countActiveByTeam(teamId: Long): Int
+
     @Query("""
-        UPDATE participants
-        SET mentorId = :mentorId,
-            mentorConfirmed = :mentorConfirmed,
-            judgeApproved = :judgeApproved
-        WHERE id = :id
+        SELECT p.* FROM participants p
+        INNER JOIN teams t ON p.teamId = t.id
+        WHERE p.personId = :personId 
+        AND t.competitionId = :competitionId
+        AND p.status = 'active'
+        LIMIT 1
     """)
-    suspend fun updateMentorAndFlags(
-        id: Long,
-        mentorId: Long?,
-        mentorConfirmed: Boolean,
-        judgeApproved: Boolean
-    )
+    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity?
 }
 <<<конец файла
 
@@ -1358,6 +1525,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
+import com.speleo.start.data.local.entity.ParticipantEntity
 import com.speleo.start.data.local.entity.TeamEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -1391,13 +1559,16 @@ interface TeamDao {
     @Query("UPDATE teams SET startTimestamp = :timestamp WHERE id = :id")
     suspend fun setStartTimestamp(id: Long, timestamp: Long)
 
-    @Query("UPDATE teams SET finishTimestamp = :timestamp, status = 'finished' WHERE id = :id")
+    // ❌ Убрано автоматическое изменение статуса — статус меняется отдельно после проверки КВ
+    @Query("UPDATE teams SET finishTimestamp = :timestamp WHERE id = :id")
     suspend fun setFinishTimestamp(id: Long, timestamp: Long)
 
     @Query("UPDATE teams SET skipCount = skipCount + 1 WHERE id = :id")
     suspend fun incrementSkipCount(id: Long)
+
     @Query("SELECT COUNT(*) FROM teams WHERE competitionId = :competitionId AND className = :className")
     suspend fun getTeamCountByClass(competitionId: Long, className: String): Int
+
     @Query("DELETE FROM teams WHERE id = :id")
     suspend fun delete(id: Long)
 
@@ -1407,7 +1578,8 @@ interface TeamDao {
     @Query("SELECT MAX(teamNumber) FROM teams WHERE competitionId = :competitionId AND className = :className")
     suspend fun getMaxTeamNumber(competitionId: Long, className: String): Int?
 
-
+    @Query("SELECT * FROM participants WHERE teamId = :teamId")
+    fun getParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
 }
 <<<конец файла
 
@@ -1565,9 +1737,9 @@ data class MasterRouteCardEntity(
     val normativeSeconds: Int = 0,
     val forClass2: Boolean = true,
     val forClass3: Boolean = true,
-    val trackWaitTime: Boolean = false,
-    val trackExecutionTime: Boolean = false,
-    val bonusPoints: Int = 0
+    val trackWaitTime: Boolean = false,      // ✅ Поле для миграции
+    val trackExecutionTime: Boolean = false, // ✅ Поле для миграции
+    val bonusPoints: Int = 0                 // ✅ Поле для миграции
 )
 <<<конец файла
 
@@ -1620,23 +1792,25 @@ import androidx.room.PrimaryKey
             entity = PersonEntity::class,
             parentColumns = ["id"],
             childColumns = ["personId"],
-            onDelete = ForeignKey.RESTRICT
+            onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["teamId"]), Index(value = ["personId"])]
+    indices = [
+        Index(value = ["teamId"]),
+        Index(value = ["personId"]),
+        Index(value = ["mentorId"])
+    ]
 )
 data class ParticipantEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val teamId: Long,
     val personId: Long,
+    val role: String = "member",      // captain | member
+    val status: String = "active",   // active | replaced | free_agent
     val mentorId: Long? = null,
-    val role: String = "member",
-    val statusMember: String = "active",
-    val judgeApproved: Boolean = false,
     val mentorConfirmed: Boolean = false,
-    val replacedAt: Long? = null,
-    val replacedBy: String? = null
+    val judgeApproved: Boolean = false
 )
 <<<конец файла
 
@@ -1892,20 +2066,42 @@ import javax.inject.Singleton
 class ParticipantRepository @Inject constructor(
     private val participantDao: ParticipantDao
 ) {
-    fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
-        participantDao.getActiveParticipantsByTeam(teamId)
+
+    fun getParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
+        participantDao.getParticipantsByTeam(teamId)
 
     fun getAllParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
         participantDao.getAllParticipantsByTeam(teamId)
 
-    fun getFreeAgents(competitionId: Long): Flow<List<ParticipantEntity>> =
-        participantDao.getFreeAgents(competitionId)
+    fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
+        participantDao.getActiveParticipantsByTeam(teamId)
+
+    fun getParticipantsByPerson(personId: Long): Flow<List<ParticipantEntity>> =
+        participantDao.getParticipantsByPerson(personId)
 
     suspend fun getParticipantById(id: Long): ParticipantEntity? =
         participantDao.getParticipantById(id)
 
-    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity? =
-        participantDao.findActiveByPersonAndComp(personId, competitionId)
+    suspend fun createParticipant(
+        teamId: Long,
+        personId: Long,
+        role: String = "member",
+        status: String = "active",
+        mentorId: Long? = null,
+        mentorConfirmed: Boolean = false,
+        judgeApproved: Boolean = false
+    ): Long {
+        val participant = ParticipantEntity(
+            teamId = teamId,
+            personId = personId,
+            role = role,
+            status = status,
+            mentorId = mentorId,
+            mentorConfirmed = mentorConfirmed,
+            judgeApproved = judgeApproved
+        )
+        return participantDao.insert(participant)
+    }
 
     suspend fun addParticipant(
         teamId: Long,
@@ -1913,34 +2109,56 @@ class ParticipantRepository @Inject constructor(
         role: String = "member",
         mentorId: Long? = null
     ): Long {
-        val participant = ParticipantEntity(
+        return createParticipant(
             teamId = teamId,
             personId = personId,
             role = role,
-            mentorId = mentorId,
-            statusMember = "active"
+            mentorId = mentorId
         )
-        return participantDao.insert(participant)
     }
 
     suspend fun updateParticipant(participant: ParticipantEntity) =
         participantDao.update(participant)
 
+    suspend fun updateStatus(id: Long, status: String) =
+        participantDao.updateStatus(id, status)
+
+    // Алиас для updateStatus — используется в TeamCardVM
     suspend fun updateParticipantStatus(id: Long, status: String) =
         participantDao.updateStatus(id, status)
 
     suspend fun updateMentor(id: Long, mentorId: Long?, confirmed: Boolean) =
         participantDao.updateMentor(id, mentorId, confirmed)
 
-    suspend fun deleteParticipant(id: Long) =
-        participantDao.delete(id)
-
     suspend fun updateMentorAndFlags(
         id: Long,
         mentorId: Long?,
         mentorConfirmed: Boolean,
         judgeApproved: Boolean
-    ) = participantDao.updateMentorAndFlags(id, mentorId, mentorConfirmed, judgeApproved)
+    ) {
+        val participant = participantDao.getParticipantById(id) ?: return
+        val updated = participant.copy(
+            mentorId = mentorId,
+            mentorConfirmed = mentorConfirmed,
+            judgeApproved = judgeApproved
+        )
+        participantDao.update(updated)
+    }
+
+    suspend fun deleteParticipant(id: Long) =
+        participantDao.delete(id)
+
+    suspend fun deleteByTeam(teamId: Long) =
+        participantDao.deleteByTeam(teamId)
+
+    suspend fun countActiveByTeam(teamId: Long): Int =
+        participantDao.countActiveByTeam(teamId)
+
+    suspend fun insertAll(participants: List<ParticipantEntity>): List<Long> =
+        participantDao.insertAll(participants)
+
+    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity? =
+        participantDao.findActiveByPersonAndComp(personId, competitionId)
 }
 <<<конец файла
 
@@ -2577,304 +2795,5 @@ sealed class Screen(val route: String) {
     }
 }
 
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/TimerManager.kt>>>
-package com.speleo.start.presentation
-
-import com.speleo.start.data.local.dao.AppSettingsDao
-import com.speleo.start.data.local.entity.AppSettingsEntity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class TimerManager @Inject constructor(
-    private val settingsDao: AppSettingsDao
-) {
-    companion object {
-        const val KEY_START_TIMESTAMP = "competition_start_timestamp"
-        const val KEY_COMPETITION_ACTIVE = "competition_active"
-    }
-
-    private val _mainTimer = MutableStateFlow(0L)
-    val mainTimer: StateFlow<Long> = _mainTimer.asStateFlow()
-
-    private val _countdown = MutableStateFlow(120)
-    val countdown: StateFlow<Int> = _countdown.asStateFlow()
-
-    private val _isPaused = MutableStateFlow(false)
-    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
-
-    private val _started = MutableStateFlow(false)
-    val started: StateFlow<Boolean> = _started.asStateFlow()
-
-    private var mainJob: Job? = null
-    private var countdownJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-
-    fun restoreFromSavedState() {
-        CoroutineScope(Dispatchers.IO).launch {
-            val startTs = settingsDao.get(KEY_START_TIMESTAMP)?.toLongOrNull() ?: 0L
-            val active = settingsDao.get(KEY_COMPETITION_ACTIVE)?.toBooleanStrictOrNull() ?: false
-
-            if (active && startTs > 0) {
-                _mainTimer.value = System.currentTimeMillis() - startTs
-                _started.value = true
-                startMainLoop()
-            }
-        }
-    }
-
-    fun startCompetition() {
-        CoroutineScope(Dispatchers.IO).launch {
-            val timestamp = System.currentTimeMillis()
-            settingsDao.put(AppSettingsEntity(KEY_START_TIMESTAMP, timestamp.toString()))
-            settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "true"))
-        }
-        _started.value = true
-        _mainTimer.value = 0L
-        _countdown.value = 120
-        startMainLoop()
-        startCountdownLoop()
-    }
-
-    private fun startMainLoop() {
-        mainJob?.cancel()
-        val startRef = System.currentTimeMillis() - _mainTimer.value
-        mainJob = scope.launch {
-            while (isActive) {
-                _mainTimer.value = System.currentTimeMillis() - startRef
-                delay(100)
-            }
-        }
-    }
-
-    private fun startCountdownLoop() {
-        countdownJob?.cancel()
-        countdownJob = scope.launch {
-            while (isActive && _countdown.value > 0) {
-                if (!_isPaused.value) {
-                    delay(1000)
-                    _countdown.value -= 1
-                } else {
-                    delay(100)
-                }
-            }
-            // Автоматически перезапускаем, когда доходит до 0
-            if (_countdown.value == 0 && _started.value) {
-                _countdown.value = 120
-                startCountdownLoop()
-            }
-        }
-    }
-
-    fun togglePause() {
-        _isPaused.value = !_isPaused.value
-    }
-
-    fun resetCountdown(seconds: Int = 120) {
-        _countdown.value = seconds
-        if (_started.value) {
-            startCountdownLoop()
-        }
-    }
-
-    fun stop() {
-        mainJob?.cancel()
-        countdownJob?.cancel()
-        _started.value = false
-        _mainTimer.value = 0L
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/TimerService.kt>>>
-package com.speleo.start.presentation
-
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class TimerService @Inject constructor() {
-
-    private val _mainTimer = MutableStateFlow(0L)
-    val mainTimer: StateFlow<Long> = _mainTimer.asStateFlow()
-
-    private val _countdown = MutableStateFlow(120)
-    val countdown: StateFlow<Int> = _countdown.asStateFlow()
-
-    private val _isPaused = MutableStateFlow(false)
-    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
-
-    private val _started = MutableStateFlow(false)
-    val started: StateFlow<Boolean> = _started.asStateFlow()
-
-    private var timerJob: Job? = null
-    private var countdownJob: Job? = null
-
-    fun startCompetition() {
-        _started.value = true
-        timerJob?.cancel()
-        countdownJob?.cancel()
-
-        timerJob = CoroutineScope(Dispatchers.Default).launch {
-            while (isActive) {
-                delay(100)
-                _mainTimer.value += 100
-            }
-        }
-
-        countdownJob = CoroutineScope(Dispatchers.Default).launch {
-            while (isActive && _countdown.value > 0) {
-                if (!_isPaused.value) {
-                    delay(1000)
-                    _countdown.value -= 1
-                } else delay(100)
-            }
-        }
-    }
-
-    fun togglePause() { _isPaused.value = !_isPaused.value }
-    fun resetCountdown() { _countdown.value = 120 }
-
-    fun stop() {
-        timerJob?.cancel()
-        countdownJob?.cancel()
-        _started.value = false
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/component/PersonBadge.kt>>>
-package com.speleo.start.presentation.component
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.speleo.start.data.local.entity.PersonEntity
-import com.speleo.start.util.AgeCalculator
-
-@Composable
-fun PersonBadge(
-    person: PersonEntity,
-    mentorName: String? = null,
-    onOpenCard: () -> Unit,
-    onMentorClick: ((Long) -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    val age = AgeCalculator.calculateAge(person.birthDate)
-    val ageMark = AgeCalculator.getAgeColorMark(person.birthDate)
-    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
-
-    val initial = person.lastName.take(1).uppercase()
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Аватар
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = initial,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ФИО
-            Text(
-                text = "${person.lastName} ${person.firstName}",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            // Возраст с цветом
-            if (age != null) {
-                Text(
-                    text = "$age лет",
-                    fontSize = 14.sp,
-                    color = ageColor
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Ментор (если есть)
-            if (mentorName != null) {
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(12.dp))
-                TextButton(onClick = { /* mentor click */ }) {
-                    Text("👨‍🏫 Ментор: $mentorName")
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            HorizontalDivider()
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Ссылка на карточку
-            TextButton(onClick = onOpenCard) {
-                Text("📄 Открыть карточку")
-            }
-        }
-    }
-}
 <<<конец файла
 

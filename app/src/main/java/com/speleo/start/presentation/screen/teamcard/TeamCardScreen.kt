@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -50,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.speleo.start.data.local.entity.PersonEntity
 import com.speleo.start.presentation.component.PersonSearchDialog
 import kotlinx.coroutines.flow.collectLatest
 
@@ -64,6 +63,8 @@ fun TeamCardScreen(
     vm: TeamCardVM = hiltViewModel()
 ) {
     val card by vm.teamCard.collectAsStateWithLifecycle()
+    val routeEntries by vm.routeEntries.collectAsStateWithLifecycle()
+    val routeStats by vm.routeStats.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showMenu by remember { mutableStateOf(false) }
@@ -71,14 +72,17 @@ fun TeamCardScreen(
     var showReplaceDialog by remember { mutableStateOf(false) }
     var showMentorDialog by remember { mutableStateOf(false) }
     var showReplacedHistory by remember { mutableStateOf(false) }
+    var showMasterUnlockDialog by remember { mutableStateOf(false) }
     var selectedParticipantId by remember { mutableStateOf<Long?>(null) }
     var selectedParticipantName by remember { mutableStateOf("") }
     var selectedParticipantForMentor by remember { mutableStateOf<TeamCardMember?>(null) }
     var disbandReason by remember { mutableStateOf("") }
     var disbandPassword by remember { mutableStateOf("") }
+    var masterPassword by remember { mutableStateOf("") }
 
     LaunchedEffect(teamId) {
         vm.loadTeam(teamId)
+        vm.loadRouteCard(teamId)
     }
 
     LaunchedEffect(Unit) {
@@ -98,6 +102,7 @@ fun TeamCardScreen(
                 }
                 is TeamCardEvent.TeamUpdated -> {
                     vm.loadTeam(event.teamId)
+                    vm.loadRouteCard(event.teamId)
                 }
             }
         }
@@ -163,7 +168,14 @@ fun TeamCardScreen(
             }
         }
     ) { padding ->
-        if (card != null) {
+        if (card == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "Загрузка...", fontSize = 18.sp)
+            }
+        } else {
             val info = card!!
             LazyColumn(
                 modifier = Modifier
@@ -172,7 +184,7 @@ fun TeamCardScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Основная информация
+                // ===== ОСНОВНАЯ ИНФОРМАЦИЯ =====
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -193,30 +205,35 @@ fun TeamCardScreen(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "Статус: ${statusToText(info.status)}", fontSize = 14.sp)
-
-                            if (info.checkpointsEntered) {
-                                Text(
-                                    text = "✅ Путевой лист подтверждён",
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF2E7D32)
-                                )
-                            } else if (info.status == "finished" && onNavigateToRouteCard != null) {
-                                TextButton(
-                                    onClick = { onNavigateToRouteCard(info.teamId) },
-                                    modifier = Modifier.padding(top = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "📄 Заполнить путевой лист",
-                                        fontSize = 13.sp,
-                                        color = Color(0xFF1E5A7A)
-                                    )
-                                }
-                            }
                         }
                     }
                 }
 
-                // Состав команды
+                // ===== СТАТИСТИКА ПУТЕВОГО ЛИСТА =====
+                item {
+                    RouteCardStatsCard(
+                        stats = routeStats,
+                        onMasterUnlock = { showMasterUnlockDialog = true }
+                    )
+                }
+
+                // ===== СПИСОК КП =====
+                if (routeEntries.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "🗺️ ПУТЕВОЙ ЛИСТ",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+
+                    items(routeEntries) { entry ->
+                        RouteCardEntryItem(entry = entry)
+                    }
+                }
+
+                // ===== СОСТАВ КОМАНДЫ =====
                 item {
                     Text(
                         text = "👥 Состав (${info.members.size})",
@@ -226,10 +243,10 @@ fun TeamCardScreen(
                     )
                 }
 
-                itemsIndexed(info.members) { index, member ->
+                items(info.members) { member ->
                     TeamMemberCard(
                         member = member,
-                        isCaptain = index == 0,
+                        isCaptain = member.role == "captain",
                         canEdit = canEdit,
                         onReplace = {
                             selectedParticipantId = member.participantId
@@ -246,7 +263,7 @@ fun TeamCardScreen(
                     )
                 }
 
-                // История замен - разворачиваемая
+                // ===== ИСТОРИЯ ЗАМЕН =====
                 if (info.replacedCount > 0) {
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -300,15 +317,10 @@ fun TeamCardScreen(
                     }
                 }
             }
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "Загрузка...", fontSize = 18.sp)
-            }
         }
     }
+
+    // ===== ДИАЛОГИ =====
 
     // Диалог расформирования
     if (showDisbandDialog) {
@@ -407,11 +419,254 @@ fun TeamCardScreen(
                     selectedParticipantForMentor = null
                 }
             },
+            filterForMentors = true,
             onDismiss = {
                 showMentorDialog = false
                 selectedParticipantForMentor = null
             }
         )
+    }
+
+    // Диалог мастер-разблокировки путевого листа
+    if (showMasterUnlockDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showMasterUnlockDialog = false
+                masterPassword = ""
+            },
+            title = { Text("Разблокировка путевого листа") },
+            text = {
+                Column {
+                    Text("Введите мастер-пароль для временной разблокировки путевого листа.")
+                    Text("После сохранения повторное подтверждение НЕ ТРЕБУЕТСЯ.", fontSize = 12.sp, color = Color(0xFFFF8C00), fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = masterPassword,
+                        onValueChange = { masterPassword = it },
+                        label = { Text("Мастер-пароль") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (masterPassword == "devdebug") {
+                            vm.unlockRouteCardForEdit(card!!.teamId)
+                            onNavigateToRouteCard?.invoke(card!!.teamId)
+                            showMasterUnlockDialog = false
+                            masterPassword = ""
+                        } else {
+                            // Неверный пароль
+                        }
+                    },
+                    enabled = masterPassword.isNotBlank()
+                ) {
+                    Text("РАЗБЛОКИРОВАТЬ")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showMasterUnlockDialog = false
+                    masterPassword = ""
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun RouteCardStatsCard(
+    stats: RouteCardStats,
+    onMasterUnlock: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Статус ПЛ
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (stats.isFullyConfirmed) "✅ ПУТЕВОЙ ЛИСТ ПОДТВЕРЖДЁН" else "📋 ПУТЕВОЙ ЛИСТ",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = if (stats.isFullyConfirmed) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
+                )
+                if (stats.isFullyConfirmed) {
+                    TextButton(
+                        onClick = onMasterUnlock,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                    ) {
+                        Text("🔓 Мастер-правка", fontSize = 10.sp, color = Color(0xFFF57C00))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Статистика
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "${stats.takenCount}/${stats.totalCount}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = Color(0xFF00A86B)
+                    )
+                    Text("Взято КП", fontSize = 10.sp, color = Color.Gray)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "${stats.totalScore}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = Color(0xFF2E7D32)
+                    )
+                    Text("Баллов", fontSize = 10.sp, color = Color.Gray)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "${stats.totalPenalty}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = Color(0xFFD32F2F)
+                    )
+                    Text("Штраф", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Время
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Старт", fontSize = 10.sp, color = Color.Gray)
+                    Text(stats.startTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+                Column {
+                    Text("Финиш", fontSize = 10.sp, color = Color.Gray)
+                    Text(stats.finishTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+                Column {
+                    Text("Отсечка", fontSize = 10.sp, color = Color.Gray)
+                    Text(stats.totalOffsetTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+                Column {
+                    Text("Чистое", fontSize = 10.sp, color = Color.Gray)
+                    Text(stats.netTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RouteCardEntryItem(entry: RouteCardEntryItem) {
+    val statusColor = when {
+        entry.taken && entry.takenWithError -> Color(0xFFFF8C00)
+        entry.taken -> Color(0xFF00A86B)
+        else -> Color.Gray
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = statusColor.copy(alpha = 0.15f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(statusColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${entry.displayNumber}",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Вес: ${entry.weight}",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    if (entry.type == "technical") {
+                        Text(
+                            text = "ТЕХНИЧЕСКИЙ",
+                            fontSize = 10.sp,
+                            color = Color(0xFFF57C00),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                val statusText = when {
+                    entry.taken && entry.takenWithError -> "⚠️ Взят с ошибкой"
+                    entry.taken -> "✅ Взят"
+                    else -> "❌ Не взят"
+                }
+                Text(
+                    text = statusText,
+                    fontSize = 13.sp,
+                    color = statusColor,
+                    fontWeight = FontWeight.Medium
+                )
+
+                if (entry.type == "technical" && entry.taken) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (entry.offsetTime != null && entry.offsetTime != "00:00") {
+                            Text(
+                                text = "⏱️ Отсечка: ${entry.offsetTime}",
+                                fontSize = 11.sp,
+                                color = Color.Gray
+                            )
+                        }
+                        if (entry.penalty > 0) {
+                            Text(
+                                text = "💰 Штраф: ${entry.penalty}",
+                                fontSize = 11.sp,
+                                color = Color(0xFFD32F2F)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

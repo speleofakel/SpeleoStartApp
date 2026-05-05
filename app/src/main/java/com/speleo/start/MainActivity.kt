@@ -16,6 +16,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.speleo.start.presentation.Screen
 import com.speleo.start.presentation.SharedState
+import com.speleo.start.presentation.screen.checkpoints.CheckpointListScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionListScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionNewScreen
 import com.speleo.start.presentation.screen.competitions.CompetitionSettingsScreen
@@ -23,8 +24,10 @@ import com.speleo.start.presentation.screen.finish.FinishScreen
 import com.speleo.start.presentation.screen.home.HomeScreen
 import com.speleo.start.presentation.screen.persons.PersonDetailScreen
 import com.speleo.start.presentation.screen.persons.PersonListScreen
+import com.speleo.start.presentation.screen.persons.PersonNewScreen
 import com.speleo.start.presentation.screen.results.ResultsScreen
 import com.speleo.start.presentation.screen.routecard.RouteCardScreen
+import com.speleo.start.presentation.screen.settings.SettingsScreen
 import com.speleo.start.presentation.screen.start.StartScreen
 import com.speleo.start.presentation.screen.team.TeamRegisterScreen
 import com.speleo.start.presentation.screen.teamcard.TeamCardScreen
@@ -35,20 +38,34 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    @Inject lateinit var sharedState: SharedState
+    @Inject
+    lateinit var sharedState: SharedState
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             SpeleoStartTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     val navController = rememberNavController()
-                    val teamId by sharedState.selectedTeamId.collectAsStateWithLifecycle()
 
-                    NavHost(navController = navController, startDestination = Screen.Home.route) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = Screen.Home.route
+                    ) {
                         composable(Screen.Home.route) {
-                            HomeScreen(onNavigate = { screen -> navController.navigate(screen.route) })
+                            HomeScreen(
+                                onNavigate = { screen ->
+                                    navController.navigate(screen.route)
+                                },
+                                onNavigateToRouteCard = { teamId ->
+                                    navController.navigate(Screen.RouteCardDetail.pass(teamId))
+                                }
+                            )
                         }
+
                         composable(Screen.PersonDetail.route) { backStackEntry ->
                             val personId = backStackEntry.arguments?.getString("personId")?.toLongOrNull() ?: -1L
                             PersonDetailScreen(
@@ -56,13 +73,16 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Competitions.route) {
                             CompetitionListScreen(
                                 onBack = { navController.popBackStack() },
                                 onCreateNew = { navController.navigate(Screen.CreateCompetition.route) },
-                                onSettings = { cid -> navController.navigate(Screen.CompetitionSettings.pass(cid)) }
+                                onSettings = { cid -> navController.navigate(Screen.CompetitionSettings.pass(cid)) },
+                                onCompetitionSelected = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.CreateCompetition.route) {
                             CompetitionNewScreen(
                                 onBack = { navController.popBackStack() },
@@ -81,16 +101,18 @@ class MainActivity : ComponentActivity() {
                                 onCheckpoints = { cid -> navController.navigate(Screen.Checkpoints.pass(cid)) }
                             )
                         }
+
                         composable(
                             route = Screen.Checkpoints.route,
                             arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
                         ) { backStackEntry ->
                             val competitionId = backStackEntry.arguments?.getLong("competitionId") ?: return@composable
-                            com.speleo.start.presentation.screen.checkpoints.CheckpointListScreen(
+                            CheckpointListScreen(
                                 competitionId = competitionId,
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Persons.route) {
                             PersonListScreen(
                                 onBack = { navController.popBackStack() },
@@ -100,12 +122,14 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+
                         composable(Screen.PersonNew.route) {
-                            com.speleo.start.presentation.screen.persons.PersonNewScreen(
+                            PersonNewScreen(
                                 onBack = { navController.popBackStack() },
                                 onSaved = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Register.route) {
                             TeamRegisterScreen(
                                 onBack = { navController.popBackStack() },
@@ -116,21 +140,39 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+
                         composable(Screen.Start.route) {
-                            StartScreen(onBack = { navController.popBackStack() })
+                            StartScreen(
+                                onBack = { navController.popBackStack() },
+                                onNavigateToCompetitions = { navController.navigate(Screen.Competitions.route) },
+                                onNavigateToTeamCard = { teamId ->
+                                    navController.navigate(Screen.TeamCard.pass(teamId))
+                                },
+                                onNavigateToFinish = { navController.navigate(Screen.Finish.route) }
+                            )
                         }
+
                         composable(Screen.Finish.route) {
-                            FinishScreen(onBack = { navController.popBackStack() })
+                            FinishScreen(
+                                onBack = { navController.popBackStack() }
+                            )
                         }
+
                         composable(Screen.TeamList.route) {
                             TeamListScreen(
                                 onBack = { navController.popBackStack() },
-                                onTeamClick = { tid -> navController.navigate(Screen.TeamCard.pass(tid)) }
+                                onTeamClick = { tid ->
+                                    navController.navigate(Screen.TeamCard.pass(tid))
+                                }
                             )
                         }
+
                         composable(Screen.Results.route) {
-                            ResultsScreen(onBack = { navController.popBackStack() })
+                            ResultsScreen(
+                                onBack = { navController.popBackStack() }
+                            )
                         }
+
                         composable(
                             route = Screen.RouteCardDetail.route,
                             arguments = listOf(navArgument("teamId") { type = NavType.LongType })
@@ -141,11 +183,13 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(Screen.Settings.route) {
-                            com.speleo.start.presentation.screen.settings.SettingsScreen(
+                            SettingsScreen(
                                 onBack = { navController.popBackStack() }
                             )
                         }
+
                         composable(
                             route = Screen.TeamCard.route,
                             arguments = listOf(navArgument("teamId") { type = NavType.LongType })
@@ -153,7 +197,10 @@ class MainActivity : ComponentActivity() {
                             val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
                             TeamCardScreen(
                                 teamId = teamId,
-                                onBack = { navController.popBackStack() }
+                                onBack = { navController.popBackStack() },
+                                onNavigateToRouteCard = { tid ->
+                                    navController.navigate(Screen.RouteCardDetail.pass(tid))
+                                }
                             )
                         }
                     }

@@ -30,6 +30,9 @@ class FinishVM @Inject constructor(
     private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
 
+    // Время финиша, зафиксированное при открытии диалога
+    private var fixedFinishTimestamp: Long = 0L
+
     fun loadStartedTeams() {
         viewModelScope.launch {
             val cid = prefs.activeCompetitionId
@@ -40,6 +43,13 @@ class FinishVM @Inject constructor(
         }
     }
 
+    /**
+     * Фиксируем время при открытии диалога
+     */
+    fun captureFinishTime() {
+        fixedFinishTimestamp = System.currentTimeMillis()
+    }
+
     fun toggleSelection(teamId: Long) {
         _selectedIds.value = _selectedIds.value.let {
             if (teamId in it) it - teamId else it + teamId
@@ -48,12 +58,21 @@ class FinishVM @Inject constructor(
 
     fun confirmFinish() {
         viewModelScope.launch {
-            val timestamp = System.currentTimeMillis()
             _selectedIds.value.forEach { id ->
-                teamRepo.setFinishTimestamp(id, timestamp)
+                teamRepo.setFinishTimestamp(id, fixedFinishTimestamp)
+                teamRepo.updateTeamStatus(id, "finished")
             }
             _selectedIds.value = emptySet()
             loadStartedTeams()
         }
+    }
+
+    /**
+     * Индивидуальная корректировка времени финиша для команды
+     */
+    suspend fun adjustFinishTime(teamId: Long, newTimestamp: Long) {
+        teamRepo.setFinishTimestamp(teamId, newTimestamp)
+        teamRepo.updateTeamStatus(teamId, "finished")
+        // TODO: добавить запись в лог
     }
 }

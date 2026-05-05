@@ -38,7 +38,7 @@ import com.speleo.start.data.local.entity.TeamRouteCardEntity
         TeamRouteCardEntity::class,
         AppSettingsEntity::class
     ],
-    version = 7,
+    version = 8,  // ИЗМЕНЕНО: 7 → 8
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -93,6 +93,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // НОВАЯ МИГРАЦИЯ: 7 → 8
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Добавляем столбец trackWaitTime в master_route_card
+                db.execSQL("ALTER TABLE master_route_card ADD COLUMN trackWaitTime INTEGER NOT NULL DEFAULT 0")
+                // Добавляем столбец trackExecutionTime в master_route_card
+                db.execSQL("ALTER TABLE master_route_card ADD COLUMN trackExecutionTime INTEGER NOT NULL DEFAULT 0")
+                // Добавляем столбец bonusPoints в master_route_card
+                db.execSQL("ALTER TABLE master_route_card ADD COLUMN bonusPoints INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -100,8 +112,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "speleo_start.db"
                 )
-                    .addMigrations(MIGRATION_5_6)
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_5_6, MIGRATION_7_8)  // ДОБАВЛЕНА новая миграция
+                    .fallbackToDestructiveMigration()  // Для отладки можно оставить, но в релизе убрать
                     .build()
                 INSTANCE = instance
                 instance

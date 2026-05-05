@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
 import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.repository.MasterRouteCardRepository
 import com.speleo.start.data.repository.MentorRepository
 import com.speleo.start.data.repository.ParticipantRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.data.repository.TeamRouteCardRepository
 import com.speleo.start.util.AgeCalculator
 import com.speleo.start.util.normalizeName
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,8 +19,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 data class TeamCardMember(
@@ -51,6 +57,30 @@ data class TeamCardInfo(
     val checkpointsEntered: Boolean = false
 )
 
+data class RouteCardEntryItem(
+    val checkpointId: Long,
+    val displayNumber: Int,
+    val weight: Int,
+    val type: String,
+    val taken: Boolean,
+    val takenWithError: Boolean,
+    val offsetTime: String?,
+    val penalty: Int
+)
+
+data class RouteCardStats(
+    val totalCount: Int = 0,
+    val takenCount: Int = 0,
+    val totalScore: Int = 0,
+    val totalPenalty: Int = 0,
+    val totalOffsetSeconds: Long = 0,
+    val totalOffsetTime: String = "00:00",
+    val startTime: String = "--:--:--",
+    val finishTime: String = "--:--:--",
+    val netTime: String = "--:--:--",
+    val isFullyConfirmed: Boolean = false
+)
+
 sealed class TeamCardEvent {
     data class ShowMessage(val message: String) : TeamCardEvent()
     data class ShowPasswordDialog(val action: String, val reason: String? = null) : TeamCardEvent()
@@ -64,11 +94,19 @@ class TeamCardVM @Inject constructor(
     private val participantRepo: ParticipantRepository,
     private val personRepo: PersonRepository,
     private val mentorRepo: MentorRepository,
+    private val masterRouteCardRepo: MasterRouteCardRepository,
+    private val teamRouteCardRepo: TeamRouteCardRepository,
     private val prefs: PreferencesManager
 ) : ViewModel() {
 
     private val _teamCard = MutableStateFlow<TeamCardInfo?>(null)
     val teamCard: StateFlow<TeamCardInfo?> = _teamCard.asStateFlow()
+
+    private val _routeEntries = MutableStateFlow<List<RouteCardEntryItem>>(emptyList())
+    val routeEntries: StateFlow<List<RouteCardEntryItem>> = _routeEntries.asStateFlow()
+
+    private val _routeStats = MutableStateFlow(RouteCardStats())
+    val routeStats: StateFlow<RouteCardStats> = _routeStats.asStateFlow()
 
     private val _event = MutableSharedFlow<TeamCardEvent>()
     val event: SharedFlow<TeamCardEvent> = _event.asSharedFlow()
@@ -77,19 +115,20 @@ class TeamCardVM @Inject constructor(
         viewModelScope.launch {
             val team = teamRepo.getTeamById(teamId) ?: return@launch
             val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
-            val activeParticipants = participants.filter { it.statusMember == "active" }
-            val replacedParticipants = participants.filter { it.statusMember == "replaced" }
+
+            val activeParticipants = participants.filter { participant -> participant.status == "active" }
+            val replacedParticipants = participants.filter { participant -> participant.status == "replaced" }
 
             val members = mutableListOf<TeamCardMember>()
-            for (p in activeParticipants) {
-                val person = personRepo.getPersonById(p.personId) ?: continue
+            for (participant in activeParticipants) {
+                val person = personRepo.getPersonById(participant.personId) ?: continue
                 val age = AgeCalculator.calculateAge(person.birthDate)
 
                 var mentorName: String? = null
-                var mentorConfirmed = p.mentorConfirmed
+                var mentorConfirmed = participant.mentorConfirmed
 
-                if (p.mentorId != null) {
-                    val mentor = mentorRepo.getMentorByParticipantId(p.id)
+                if (participant.mentorId != null) {
+                    val mentor = mentorRepo.getMentorByParticipantId(participant.id)
                     if (mentor != null) {
                         val mentorPerson = personRepo.getPersonById(mentor.personId)
                         mentorName = mentorPerson?.let { "${it.lastName} ${it.firstName}" }
@@ -98,7 +137,7 @@ class TeamCardVM @Inject constructor(
 
                 members.add(
                     TeamCardMember(
-                        participantId = p.id,
+                        participantId = participant.id,
                         personId = person.id,
                         firstName = person.firstName,
                         lastName = person.lastName,
@@ -107,17 +146,20 @@ class TeamCardVM @Inject constructor(
                         phone = person.phone,
                         gender = person.gender,
                         age = age,
-                        role = p.role,
+                        role = participant.role,
                         mentorName = mentorName,
                         mentorConfirmed = mentorConfirmed,
-                        judgeApproved = p.judgeApproved
+                        judgeApproved = participant.judgeApproved
                     )
                 )
             }
 
-            val replacedMembers = replacedParticipants.mapNotNull { replaced ->
+            val replacedMembers = mutableListOf<String>()
+            for (replaced in replacedParticipants) {
                 val person = personRepo.getPersonById(replaced.personId)
-                person?.let { "${it.lastName} ${it.firstName}" }
+                if (person != null) {
+                    replacedMembers.add("${person.lastName} ${person.firstName}")
+                }
             }
 
             _teamCard.value = TeamCardInfo(
@@ -136,17 +178,152 @@ class TeamCardVM @Inject constructor(
         }
     }
 
+    fun loadRouteCard(teamId: Long) {
+        viewModelScope.launch {
+            val team = teamRepo.getTeamById(teamId) ?: return@launch
+
+            // Запускаем отдельную корутину для сбора Flow
+            launch {
+                masterRouteCardRepo.getRouteCardByCompetition(team.competitionId)
+                    .combine(teamRouteCardRepo.getRouteCardByTeam(teamId)) { master, teamRoute ->
+                        val items = master.map { cp ->
+                            val te = teamRoute.find { it.checkpointId == cp.id }
+                            RouteCardEntryItem(
+                                checkpointId = cp.id,
+                                displayNumber = cp.displayNumber,
+                                weight = cp.weight,
+                                type = cp.type,
+                                taken = te?.taken ?: false,
+                                takenWithError = te?.takenWithError ?: false,
+                                offsetTime = te?.offsetTime?.let { formatSecondsToMmSs(it.toInt()) },
+                                penalty = te?.penalty ?: 0
+                            )
+                        }
+
+                        val stats = calculateStats(team, items)
+                        _routeStats.value = stats
+                        _routeEntries.value = items
+                    }
+                    .collect()
+            }
+        }
+    }
+
+    private fun calculateStats(team: com.speleo.start.data.local.entity.TeamEntity, entries: List<RouteCardEntryItem>): RouteCardStats {
+        val takenCorrectEntries = entries.filter { it.taken && !it.takenWithError }
+        val totalScore = takenCorrectEntries.sumOf { it.weight }
+        val totalPenalty = entries.filter { it.taken }.sumOf { it.penalty }
+        val takenCount = entries.count { it.taken }
+
+        // totalOffsetSeconds - сумма отсечек только для взятых КП
+        val totalOffsetSeconds = entries
+            .filter { it.taken && it.offsetTime != null }
+            .sumOf { parseMmSsToSeconds(it.offsetTime ?: "00:00") ?: 0 }
+
+        val startTime = team.startTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
+        val finishTime = team.finishTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
+
+        val raceSeconds = if (team.startTimestamp != null && team.finishTimestamp != null) {
+            (team.finishTimestamp!! - team.startTimestamp!!) / 1000
+        } else 0
+
+        val netSeconds = (raceSeconds - totalOffsetSeconds).coerceAtLeast(0)
+
+        return RouteCardStats(
+            totalCount = entries.size,
+            takenCount = takenCount,
+            totalScore = totalScore - totalPenalty,
+            totalPenalty = totalPenalty,
+            totalOffsetSeconds = totalOffsetSeconds.toLong(),
+            totalOffsetTime = formatSecondsToMmSs(totalOffsetSeconds),
+            startTime = startTime,
+            finishTime = finishTime,
+            netTime = formatSecondsToMmSs(netSeconds.toInt()),
+            isFullyConfirmed = team.checkpointsEntered
+        )
+    }
+
+    private fun calculateStats(team: com.speleo.start.data.local.entity.TeamEntity?, entries: List<RouteCardEntryItem>): RouteCardStats {
+        val takenEntries = entries.filter { it.taken && !it.takenWithError }
+        val totalScore = takenEntries.sumOf { it.weight }
+        val totalPenalty = entries.filter { it.taken }.sumOf { it.penalty }
+        val takenCount = entries.count { it.taken }
+        val totalOffsetSeconds = entries.filter { it.taken && it.offsetTime != null }.sumOf {
+            parseMmSsToSeconds(it.offsetTime ?: "00:00") ?: 0
+        }
+
+        val startTime = team?.startTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
+        val finishTime = team?.finishTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
+        val raceSeconds = if (team?.startTimestamp != null && team.finishTimestamp != null) {
+            (team.finishTimestamp!! - team.startTimestamp!!) / 1000
+        } else 0
+        val netSeconds = (raceSeconds - totalOffsetSeconds).coerceAtLeast(0)
+
+        return RouteCardStats(
+            totalCount = entries.size,
+            takenCount = takenCount,
+            totalScore = totalScore - totalPenalty,
+            totalPenalty = totalPenalty,
+            totalOffsetSeconds = totalOffsetSeconds,
+            totalOffsetTime = formatSecondsToMmSs(totalOffsetSeconds.toInt()),
+            startTime = startTime,
+            finishTime = finishTime,
+            netTime = formatSecondsToMmSs(netSeconds.toInt()),
+            isFullyConfirmed = team?.checkpointsEntered ?: false
+        )
+    }
+
+    private fun formatTimestamp(timestamp: Long): String {
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        return sdf.format(Date(timestamp))
+    }
+
+    private fun formatSecondsToMmSs(totalSeconds: Int): String {
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, seconds)
+        else "%02d:%02d".format(minutes, seconds)
+    }
+
+    private fun parseMmSsToSeconds(input: String): Int? {
+        val parts = input.split(":")
+        return when (parts.size) {
+            2 -> {
+                val minutes = parts[0].toIntOrNull() ?: return null
+                val seconds = parts[1].toIntOrNull() ?: return null
+                minutes * 60 + seconds
+            }
+            3 -> {
+                val hours = parts[0].toIntOrNull() ?: return null
+                val minutes = parts[1].toIntOrNull() ?: return null
+                val seconds = parts[2].toIntOrNull() ?: return null
+                hours * 3600 + minutes * 60 + seconds
+            }
+            else -> null
+        }
+    }
+
+    fun unlockRouteCardForEdit(teamId: Long) {
+        viewModelScope.launch {
+            val team = teamRepo.getTeamById(teamId) ?: return@launch
+            teamRepo.updateTeam(team.copy(checkpointsEntered = false))
+            loadTeam(teamId)
+            loadRouteCard(teamId)
+        }
+    }
+
     fun getColorMarkText(): String {
         val card = _teamCard.value ?: return ""
-        val hasMinor = card.members.any { it.age != null && it.age in 14..17 && !it.mentorConfirmed }
-        val hasChild = card.members.any { it.age != null && it.age < 14 && !it.judgeApproved }
+        val hasMinor = card.members.any { member -> member.age != null && member.age in 14..17 && !member.mentorConfirmed }
+        val hasChild = card.members.any { member -> member.age != null && member.age < 14 && !member.judgeApproved }
         return when {
             card.status == "disqualified" -> "СНЯТЫ"
             hasChild -> "<14 !!!"
             hasMinor -> "<17 !!!"
             else -> {
-                if (card.members.any { it.age != null && it.age in 14..17 }) "14+"
-                else if (card.members.any { it.age != null && it.age < 14 }) "<14ок"
+                if (card.members.any { member -> member.age != null && member.age in 14..17 }) "14+"
+                else if (card.members.any { member -> member.age != null && member.age < 14 }) "<14ок"
                 else "18+"
             }
         }
@@ -181,8 +358,14 @@ class TeamCardVM @Inject constructor(
                     return@launch
                 }
 
-                val existingInTeam = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                    .any { it.personId == newPersonId }
+                val activeParticipants = participantRepo.getActiveParticipantsByTeam(team.id).first()
+                var existingInTeam = false
+                for (participant in activeParticipants) {
+                    if (participant.personId == newPersonId) {
+                        existingInTeam = true
+                        break
+                    }
+                }
                 if (existingInTeam) {
                     _event.emit(TeamCardEvent.ShowMessage("Эта персона уже в команде"))
                     return@launch
@@ -224,7 +407,6 @@ class TeamCardVM @Inject constructor(
             val rawLastName = parts[0]
             val rawFirstName = if (parts.size > 1) parts.drop(1).joinToString(" ") else ""
 
-            // FIX: Применяем нормализацию к введенным данным
             val lastName = rawLastName.normalizeName()
             val firstName = rawFirstName.normalizeName()
 
@@ -266,14 +448,12 @@ class TeamCardVM @Inject constructor(
                     return@launch
                 }
 
-                // Проверяем возраст ментора (должен быть >= 18)
                 val mentorAge = AgeCalculator.calculateAge(mentorPerson.birthDate)
                 if (mentorAge == null || mentorAge < 18) {
                     _event.emit(TeamCardEvent.ShowMessage("Выбранный человек не может быть ментором (возраст < 18)"))
                     return@launch
                 }
 
-                // Находим или создаем запись в таблице mentors
                 var mentorEntity = mentorRepo.getMentorByPersonId(mentorPersonId)
                 if (mentorEntity == null) {
                     val newMentorId = mentorRepo.createMentor(mentorPersonId)
@@ -284,7 +464,6 @@ class TeamCardVM @Inject constructor(
                     mentorEntity = mentorRepo.getMentorByPersonId(mentorPersonId)
                 }
 
-                // Обновляем участника: привязываем ментора и подтверждаем
                 participantRepo.updateMentorAndFlags(
                     id = participant.id,
                     mentorId = mentorEntity?.id,
@@ -352,8 +531,8 @@ class TeamCardVM @Inject constructor(
             }
 
             try {
-                val participants = participantRepo.getActiveParticipantsByTeam(card.teamId).first()
-                for (participant in participants) {
+                val activeParticipants = participantRepo.getActiveParticipantsByTeam(card.teamId).first()
+                for (participant in activeParticipants) {
                     participantRepo.updateParticipantStatus(participant.id, "free_agent")
                 }
 

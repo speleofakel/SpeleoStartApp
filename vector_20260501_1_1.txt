@@ -1,0 +1,1511 @@
+app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterScreen.kt>>>
+package com.speleo.start.presentation.screen.team
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.presentation.component.TitleCaseTextField
+import com.speleo.start.util.DateValidator
+import com.speleo.start.util.PhoneFormatter
+import kotlinx.coroutines.flow.collectLatest
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TeamRegisterScreen(
+    onBack: () -> Unit,
+    onNavigateToTeam: (Long) -> Unit = {},
+    vm: TeamRegisterVM = hiltViewModel()
+) {
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by vm.searchResults.collectAsStateWithLifecycle()
+    val minTeamSize by vm.minTeamSize.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var selectedClass by remember { mutableStateOf("2") }
+    var members by remember { mutableStateOf(listOf<MemberDraft>()) }
+    var showMentorPickerFor by remember { mutableStateOf<Int?>(null) }
+    var mentorSearchQuery by remember { mutableStateOf("") }
+    var showConflictDialog by remember { mutableStateOf<Pair<String, TeamRegisterVM.UiEvent.ConflictDialog>?>(null) }
+    val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(Unit) {
+        vm.loadCompetitionSettings()
+        vm.event.collectLatest { event ->
+            when (event) {
+                is TeamRegisterVM.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
+                is TeamRegisterVM.UiEvent.NavigateBack -> onBack()
+                is TeamRegisterVM.UiEvent.ConflictDialog -> showConflictDialog = event.personName to event
+                is TeamRegisterVM.UiEvent.NavigateToTeam -> onNavigateToTeam(event.teamId)
+            }
+        }
+    }
+
+    val allRequirementsMet = remember(members) {
+        members.all { member ->
+            when (member.ageGroup) {
+                AgeGroup.ADULT -> true
+                AgeGroup.MINOR -> member.mentor != null && member.mentorConfirmed
+                AgeGroup.CHILD -> member.mentor != null && member.mentorConfirmed && member.judgeApproved
+                AgeGroup.UNKNOWN -> false
+            }
+        }
+    }
+    val canSave = members.size >= minTeamSize && allRequirementsMet && members.all { it.isValid }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(title = { Text("Регистрация команды") }, navigationIcon = {
+                TextButton(onClick = onBack) { Text("← Назад") }
+            })
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Класс:", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("2" to "2-й класс", "3" to "3-й класс").forEach { (v, l) ->
+                    FilterChip(selected = selectedClass == v, onClick = { selectedClass = v }, label = { Text(l) })
+                }
+            }
+
+            val emptyIndex = members.indexOfFirst { it.person == null && !it.isQuickCreate }
+            if (emptyIndex >= 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("🔍 Поиск участника ${emptyIndex + 1}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { vm.onSearchQueryChange(it) },
+                            label = { Text("Фамилия") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, keyboardType = KeyboardType.Text),
+                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AnimatedVisibility(visible = searchResults.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                searchResults.forEach { person ->
+                                    PersonSearchResultItem(
+                                        person = person,
+                                        onClick = {
+                                            vm.onPersonSelected(person) {
+                                                members = members.toMutableList().also {
+                                                    it[emptyIndex] = members[emptyIndex].copy(
+                                                        person = person,
+                                                        ageGroup = calculateAgeGroup(person.birthDate),
+                                                        isQuickCreate = false
+                                                    )
+                                                }
+                                                vm.onSearchQueryChange("")
+                                                focusManager.clearFocus()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        AnimatedVisibility(visible = searchQuery.length >= 2 && searchResults.isEmpty()) {
+                            Column {
+                                Text("Ничего не найдено", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 4.dp))
+                                Button(
+                                    onClick = {
+                                        members = members.toMutableList().also {
+                                            it[emptyIndex] = members[emptyIndex].copy(isQuickCreate = true, quickLastName = searchQuery)
+                                        }
+                                        vm.onSearchQueryChange("")
+                                        focusManager.clearFocus()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("➕ Создать: $searchQuery") }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text("Участники (${members.size}/$minTeamSize мин.):", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+            members.forEachIndexed { index, member ->
+                MemberCard(
+                    index = index, member = member,
+                    onRemove = { members = members.toMutableList().also { it.removeAt(index) } },
+                    onToggleJudgeApproval = {
+                        members = members.toMutableList().also { it[index] = member.copy(judgeApproved = !member.judgeApproved) }
+                    },
+                    onOpenMentorPicker = { showMentorPickerFor = index },
+                    onRemoveMentor = {
+                        members = members.toMutableList().also { it[index] = member.copy(mentor = null, mentorConfirmed = false) }
+                    },
+                    onUpdateQuickFields = { updated ->
+                        members = members.toMutableList().also { it[index] = updated }
+                    },
+                    vm = vm
+                )
+            }
+
+            if (members.size < 6) {
+                OutlinedButton(onClick = { members = members + MemberDraft() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("➕ Добавить участника")
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = { vm.registerTeam(className = selectedClass, members = members) }, modifier = Modifier.fillMaxWidth(), enabled = canSave) {
+                Text("СОХРАНИТЬ КОМАНДУ")
+            }
+            if (!allRequirementsMet && members.isNotEmpty()) {
+                Text("⚠️ Проверьте менторов и разрешения судьи", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+
+    showConflictDialog?.let { (name, event) ->
+        AlertDialog(
+            onDismissRequest = { showConflictDialog = null },
+            title = { Text("Участник занят") },
+            text = { Text("$name уже числится в команде №${event.teamNumber} (${event.className}-й класс). Перейти в карточку команды?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConflictDialog = null
+                    onNavigateToTeam(event.teamId)
+                }) { Text("Перейти") }
+            },
+            dismissButton = { TextButton(onClick = { showConflictDialog = null }) { Text("Отмена") } }
+        )
+    }
+
+    if (showMentorPickerFor != null) {
+        val memberIndex = showMentorPickerFor!!
+        AlertDialog(
+            onDismissRequest = { showMentorPickerFor = null },
+            title = { Text("Выбор ментора") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = mentorSearchQuery,
+                        onValueChange = { mentorSearchQuery = it; vm.onMentorSearchQueryChange(it) },
+                        label = { Text("🔍 Фамилия ментора (≥18)") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val mentorResults by vm.mentorSearchResults.collectAsStateWithLifecycle()
+                    LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
+                        items(mentorResults) { person ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    members = members.toMutableList().also {
+                                        it[memberIndex] = members[memberIndex].copy(mentor = person, mentorConfirmed = true)
+                                    }
+                                    showMentorPickerFor = null
+                                    mentorSearchQuery = ""
+                                    vm.onMentorSearchQueryChange("")
+                                }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${person.lastName} ${person.firstName}", modifier = Modifier.weight(1f))
+                                val age = DateValidator.calculateAge(person.birthDate)
+                                if (age != null) Text("$age лет", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                    if (mentorSearchQuery.length >= 2 && mentorResults.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                vm.createQuickMentor(lastName = mentorSearchQuery, firstName = "") { newMentorId ->
+                                    vm.getPersonById(newMentorId) { person ->
+                                        person?.let {
+                                            members = members.toMutableList().also {
+                                                it[memberIndex] = members[memberIndex].copy(mentor = person, mentorConfirmed = true)
+                                            }
+                                        }
+                                    }
+                                    showMentorPickerFor = null; mentorSearchQuery = ""; vm.onMentorSearchQueryChange("")
+                                }
+                            }, modifier = Modifier.fillMaxWidth()
+                        ) { Text("➕ Быстрый ментор: $mentorSearchQuery") }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showMentorPickerFor = null }) { Text("Отмена") } }
+        )
+    }
+}
+
+@Composable
+private fun PersonSearchResultItem(person: PersonEntity, onClick: () -> Unit) {
+    val age = DateValidator.calculateAge(person.birthDate)
+    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
+    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+    Card(modifier = Modifier.fillMaxWidth().clickable { onClick() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                Text(person.lastName.take(1).uppercase(), fontSize = 16.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("${person.lastName} ${person.firstName}", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                if (person.nickname != null) Text("«${person.nickname}»", fontSize = 11.sp, color = Color.Gray)
+            }
+            if (age != null) Text("$age лет", fontSize = 13.sp, color = ageColor)
+        }
+    }
+}
+
+@Composable
+private fun MemberCard(
+    index: Int, member: MemberDraft,
+    onRemove: () -> Unit, onToggleJudgeApproval: () -> Unit,
+    onOpenMentorPicker: () -> Unit, onRemoveMentor: () -> Unit,
+    onUpdateQuickFields: (MemberDraft) -> Unit,
+    vm: TeamRegisterVM
+) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+        containerColor = when {
+            member.person == null && !member.isQuickCreate -> MaterialTheme.colorScheme.surfaceVariant
+            !member.isValid -> MaterialTheme.colorScheme.errorContainer
+            else -> MaterialTheme.colorScheme.surface
+        }
+    )) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(if (index == 0) "👑 Капитан" else "👤 Участник", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.background(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small).padding(horizontal = 8.dp, vertical = 2.dp))
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Text("✕", fontSize = 14.sp, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            when {
+                member.isQuickCreate -> QuickCreateForm(member = member, onUpdate = onUpdateQuickFields, vm = vm)
+                member.person != null -> {
+                    val person = member.person!!
+                    val age = DateValidator.calculateAge(person.birthDate)
+                    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
+                    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                            Text(person.lastName.take(1).uppercase(), fontSize = 18.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${person.lastName} ${person.firstName}", fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                            if (age != null) Text("$age лет · ${ageMark.label}", fontSize = 12.sp, color = ageColor)
+                        }
+                    }
+                    when (member.ageGroup) {
+                        AgeGroup.MINOR, AgeGroup.CHILD -> {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            if (member.mentor != null) MentorRow(mentor = member.mentor!!, onRemoveMentor = onRemoveMentor)
+                            else OutlinedButton(onClick = onOpenMentorPicker, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 4.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                                Text("⚠️ Ментор", fontSize = 12.sp)
+                            }
+                            if (member.ageGroup == AgeGroup.CHILD) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(32.dp)) {
+                                    Checkbox(checked = member.judgeApproved, onCheckedChange = { onToggleJudgeApproval() }, modifier = Modifier.size(32.dp))
+                                    Text("Разрешено судьёй", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+                else -> Text("Введите фамилию в поле поиска выше", color = Color.Gray, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MentorRow(mentor: PersonEntity, onRemoveMentor: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("👨‍🏫 ${mentor.lastName} ${mentor.firstName}", fontSize = 13.sp, color = Color(0xFF1E5A7A))
+        TextButton(onClick = onRemoveMentor, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("Сменить", fontSize = 11.sp) }
+    }
+}
+
+@Composable
+private fun QuickCreateForm(member: MemberDraft, onUpdate: (MemberDraft) -> Unit, vm: TeamRegisterVM) {
+    var showExtra by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val isDateValid = member.quickBirthDate.isBlank() || (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate))
+    val dateHasError = member.quickBirthDate.isNotBlank() && !isDateValid
+    val age = if (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate)) DateValidator.calculateAge(member.quickBirthDate) else null
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TitleCaseTextField(value = member.quickLastName, onValueChange = { onUpdate(member.copy(quickLastName = it)) }, label = "Фамилия", modifier = Modifier.fillMaxWidth(), onNext = { focusManager.moveFocus(FocusDirection.Down) })
+        TitleCaseTextField(value = member.quickFirstName, onValueChange = { onUpdate(member.copy(quickFirstName = it)) }, label = "Имя", modifier = Modifier.fillMaxWidth(), onNext = { focusManager.moveFocus(FocusDirection.Down) })
+        TextButton(onClick = { showExtra = !showExtra }, contentPadding = PaddingValues(vertical = 0.dp)) { Text(if (showExtra) "▾ Доп." else "▸ Доп.", fontSize = 12.sp) }
+        AnimatedVisibility(visible = showExtra) {
+            TitleCaseTextField(value = member.quickMiddleName, onValueChange = { onUpdate(member.copy(quickMiddleName = it)) }, label = "Отчество", modifier = Modifier.fillMaxWidth())
+        }
+
+        var dateState by remember { mutableStateOf(TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))) }
+        LaunchedEffect(member.quickBirthDate) {
+            if (dateState.text != member.quickBirthDate) {
+                dateState = TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))
+            }
+        }
+        OutlinedTextField(
+            value = dateState,
+            onValueChange = { newVal ->
+                val digits = newVal.text.filter { it.isDigit() }.take(8)
+                val formatted = buildString { for (i in digits.indices) { if (i == 2 || i == 4) append("."); append(digits[i]) } }
+                val newCursor = newVal.selection.start.coerceIn(0, formatted.length)
+                dateState = newVal.copy(text = formatted, selection = TextRange(newCursor))
+                onUpdate(member.copy(quickBirthDate = formatted))
+                if (formatted.length == 10) focusManager.moveFocus(FocusDirection.Down)
+            },
+            label = { Text(if (dateHasError) "Некорректная дата" else "Дата рождения") },
+            isError = dateHasError, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+        )
+        if (dateHasError) Text("Некорректная дата", color = Color(0xFFD32F2F), fontSize = 11.sp, modifier = Modifier.padding(start = 16.dp))
+        else if (age != null) {
+            val color = when { age < 14 -> Color(0xFFD32F2F); age in 14..17 -> Color(0xFFFF8C00); age > 70 -> Color(0xFFFF8C00); else -> Color(0xFF00A86B) }
+            Text("Возраст: $age лет", color = color, fontSize = 12.sp)
+        }
+
+        var phoneState by remember { mutableStateOf(TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length))) }
+        LaunchedEffect(member.quickPhone) { if (phoneState.text != member.quickPhone) phoneState = TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length)) }
+        OutlinedTextField(value = phoneState, onValueChange = { newVal ->
+            val digits = newVal.text.filter { it.isDigit() }
+            val formatted = PhoneFormatter.formatAsYouType(digits)
+            phoneState = TextFieldValue(formatted, TextRange(formatted.length))
+            onUpdate(member.copy(quickPhone = formatted))
+        }, label = { Text("Телефон") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("male" to "М", "female" to "Ж").forEach { (v, l) -> FilterChip(selected = member.quickGender == v, onClick = { onUpdate(member.copy(quickGender = v)) }, label = { Text(l, fontSize = 12.sp) }) }
+        }
+
+        val canSavePerson = member.quickLastName.isNotBlank() && member.quickFirstName.isNotBlank() && isDateValid
+        Button(onClick = {
+            vm.createQuickPerson(
+                lastName = member.quickLastName, firstName = member.quickFirstName, middleName = member.quickMiddleName.ifBlank { null },
+                birthDate = member.quickBirthDate.ifBlank { null }, phone = member.quickPhone.ifBlank { null }, gender = member.quickGender
+            ) { savedId ->
+                vm.getPersonById(savedId) { person ->
+                    person?.let { onUpdate(member.copy(person = it, isQuickCreate = false)) }
+                }
+            }
+        }, modifier = Modifier.fillMaxWidth(), enabled = canSavePerson) { Text("💾 СОХРАНИТЬ", fontSize = 13.sp) }
+    }
+}
+
+private fun calculateAgeGroup(birthDate: String?): AgeGroup {
+    val age = DateValidator.calculateAge(birthDate) ?: return AgeGroup.UNKNOWN
+    return when { age >= 18 -> AgeGroup.ADULT; age in 14..17 -> AgeGroup.MINOR; else -> AgeGroup.CHILD }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonNewScreen.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.speleo.start.util.DateValidator
+import com.speleo.start.util.PhoneFormatter
+import java.util.Calendar
+import com.speleo.start.presentation.component.TitleCaseTextField
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PersonNewScreen(
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+    vm: PersonNewVM = hiltViewModel()
+) {
+    var lastName by remember { mutableStateOf("") }
+    var firstName by remember { mutableStateOf("") }
+    var middleName by remember { mutableStateOf("") }
+    var nickname by remember { mutableStateOf("") }
+    var showExtraFields by remember { mutableStateOf(false) }
+    var birthDate by remember { mutableStateOf("") }
+    var noBirthDate by remember { mutableStateOf(false) }
+    var phone by remember { mutableStateOf("") }
+    var phoneState by remember { mutableStateOf(TextFieldValue("")) }
+    var gender by remember { mutableStateOf("male") }
+
+    // Проверка валидности даты — используем isRealDate вместо isValid
+    val isDateValid = birthDate.isBlank() ||
+            (birthDate.length == 10 && DateValidator.isRealDate(birthDate))
+
+    val age = remember(birthDate) {
+        if (!noBirthDate && birthDate.length == 10 && DateValidator.isRealDate(birthDate)) {
+            try {
+                val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                val birth = sdf.parse(birthDate)
+                val today = Calendar.getInstance()
+                val birthCal = Calendar.getInstance().apply { time = birth!! }
+                var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
+                if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) age--
+                age
+            } catch (e: Exception) { null }
+        } else null
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Новая персона") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Фамилия
+            TitleCaseTextField(
+                value = lastName,
+                onValueChange = { lastName = it },
+                label = "Фамилия",
+                modifier = Modifier.fillMaxWidth()
+            )
+            // Имя
+            TitleCaseTextField(
+                value = firstName,
+                onValueChange = { firstName = it },
+                label = "Имя",
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Скрытые поля: Отчество + Позывной
+            TextButton(onClick = { showExtraFields = !showExtraFields }) {
+                Text(if (showExtraFields) "▾ Дополнительно" else "▸ Дополнительно")
+            }
+            AnimatedVisibility(visible = showExtraFields) {
+                Column {
+                    TitleCaseTextField(
+                        value = middleName,
+                        onValueChange = { middleName = it },
+                        label = "Отчество",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TitleCaseTextField(
+                        value = nickname,
+                        onValueChange = { nickname = it },
+                        label = "Позывной",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            // Дата рождения
+            if (!noBirthDate) {
+                DateOfBirthField(
+                    value = birthDate,
+                    onValueChange = { birthDate = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = !isDateValid && birthDate.isNotBlank()
+                )
+                if (!isDateValid && birthDate.isNotBlank()) {
+                    Text(
+                        "Некорректная дата",
+                        color = Color(0xFFD32F2F),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                }
+                age?.let {
+                    val color = when {
+                        it < 14 -> Color(0xFFD32F2F)
+                        it in 14..17 -> Color(0xFFFF8C00)
+                        it > 70 -> Color(0xFFFF8C00)
+                        else -> Color(0xFF00A86B)
+                    }
+                    Text("Возраст: $it лет", color = color, fontSize = 14.sp)
+                    if (it >= 18) {
+                        Text("👨‍🏫 Может быть ментором", color = Color(0xFF1E5A7A), fontSize = 13.sp)
+                    }
+                }
+            }
+
+            // Чекбокс «Без даты рождения»
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = noBirthDate, onCheckedChange = { noBirthDate = it })
+                Text("Без даты рождения", fontSize = 14.sp)
+            }
+
+            // Телефон
+            OutlinedTextField(
+                value = phoneState,
+                onValueChange = { newVal ->
+                    val digits = newVal.text.filter { it.isDigit() }
+                    val formatted = PhoneFormatter.formatAsYouType(digits)
+                    phoneState = TextFieldValue(formatted, TextRange(formatted.length))
+                    phone = formatted
+                },
+                label = { Text("Телефон") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            )
+
+            // Пол
+            Text("Пол", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("male" to "Мужской", "female" to "Женский").forEach { (v, l) ->
+                    FilterChip(selected = gender == v, onClick = { gender = v }, label = { Text(l) })
+                }
+            }
+
+            // Кнопка сохранения — блокируется при некорректной дате
+            Button(
+                onClick = {
+                    vm.savePerson(
+                        lastName = lastName,
+                        firstName = firstName,
+                        middleName = middleName.ifBlank { null },
+                        nickname = nickname.ifBlank { null },
+                        birthDate = if (noBirthDate) null else birthDate.ifBlank { null },
+                        phone = phone.ifBlank { null },
+                        gender = gender
+                    ) { onSaved() }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = lastName.isNotBlank() && firstName.isNotBlank() && isDateValid
+            ) {
+                Text("СОХРАНИТЬ")
+            }
+        }
+    }
+}
+
+@Composable
+fun DateOfBirthField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false
+) {
+    // НЕ используем remember(value) — храним состояние отдельно
+    var state by remember {
+        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
+    }
+
+    // Синхронизация только извне
+    LaunchedEffect(value) {
+        if (state.text != value) {
+            state = TextFieldValue(value, TextRange(value.length))
+        }
+    }
+
+    OutlinedTextField(
+        value = state,
+        onValueChange = { newVal ->
+            val formatted = DateValidator.formatAsYouType(newVal.text)
+
+            // Если форматирование не изменило текст — просто обновляем
+            if (formatted == newVal.text) {
+                state = newVal
+                if (formatted != value) onValueChange(formatted)
+                return@OutlinedTextField
+            }
+
+            // Пересчитываем позицию курсора
+            val oldCursor = newVal.selection.start
+            val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
+            val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
+            val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
+
+            state = newVal.copy(
+                text = formatted,
+                selection = TextRange(newCursor)
+            )
+            if (formatted != value) onValueChange(formatted)
+        },
+        label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
+        modifier = modifier,
+        singleLine = true,
+        isError = isError,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/component/TitleCaseTextField.kt>>>
+package com.speleo.start.presentation.component
+
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import com.speleo.start.util.StringExt.toTitleCase
+
+@Composable
+fun TitleCaseTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = true,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    imeAction: ImeAction = ImeAction.Next,
+    onNext: (() -> Unit)? = null
+) {
+    var textFieldValue by remember {
+        mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
+    }
+    var hasFocus by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+
+    // Синхронизация с внешним value
+    LaunchedEffect(value) {
+        if (textFieldValue.text != value && textFieldValue.composition == null) {
+            val newSelection = if (hasFocus && value.isNotEmpty()) {
+                TextRange(0, value.length)
+            } else {
+                TextRange(value.length)
+            }
+            textFieldValue = TextFieldValue(text = value, selection = newSelection)
+        }
+    }
+
+    // Выделить всё при получении фокуса
+    LaunchedEffect(hasFocus, value) {
+        if (hasFocus && value.isNotEmpty() && textFieldValue.composition == null) {
+            textFieldValue = textFieldValue.copy(selection = TextRange(0, value.length))
+        }
+    }
+
+    OutlinedTextField(
+        value = textFieldValue,
+        onValueChange = { newValue ->
+            val raw = newValue.text
+
+            // Пробел в конце → переход на следующее поле
+            if (raw.endsWith(" ") && raw.trim().isNotEmpty() && newValue.composition == null) {
+                val trimmed = raw.trim().toTitleCase()
+                textFieldValue = TextFieldValue(trimmed, TextRange(trimmed.length))
+                onValueChange(trimmed)
+                onNext?.invoke() ?: focusManager.moveFocus(FocusDirection.Down)
+                return@OutlinedTextField
+            }
+
+            // Форматирование только когда IME закончил композицию
+            if (newValue.composition == null) {
+                val formatted = raw.toTitleCase()
+
+                val wasFullySelected = textFieldValue.selection.start == 0 &&
+                        textFieldValue.selection.end == textFieldValue.text.length
+                val newCursor = if (wasFullySelected || newValue.selection.start == raw.length) {
+                    formatted.length
+                } else {
+                    newValue.selection.start.coerceIn(0, formatted.length)
+                }
+
+                textFieldValue = TextFieldValue(
+                    text = formatted,
+                    selection = TextRange(newCursor)
+                )
+
+                if (formatted != value) {
+                    onValueChange(formatted)
+                }
+            } else {
+                textFieldValue = newValue
+            }
+        },
+        label = { Text(label) },
+        modifier = modifier.onFocusChanged { focusState ->
+            hasFocus = focusState.isFocused
+            if (focusState.isFocused && value.isNotEmpty()) {
+                textFieldValue = textFieldValue.copy(selection = TextRange(0, value.length))
+            }
+        },
+        singleLine = singleLine,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = keyboardType,
+            imeAction = imeAction
+        ),
+        keyboardActions = KeyboardActions(
+            onNext = { onNext?.invoke() ?: focusManager.moveFocus(FocusDirection.Down) }
+        )
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterVM.kt>>>
+package com.speleo.start.presentation.screen.team
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.util.DateValidator
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class TeamRegisterVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val personRepo: PersonRepository,
+    private val participantRepo: ParticipantRepository,
+    private val competitionRepo: CompetitionRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _mentorSearchQuery = MutableStateFlow("")
+    val mentorSearchQuery: StateFlow<String> = _mentorSearchQuery.asStateFlow()
+
+    val searchResults = _searchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.length >= 2) personRepo.searchPersons(query)
+            else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val mentorSearchResults = _mentorSearchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.length >= 2) {
+                personRepo.searchPersons(query).map { list ->
+                    list.filter { person ->
+                        val age = DateValidator.calculateAge(person.birthDate)
+                        age != null && age >= 18
+                    }
+                }
+            } else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _minTeamSize = MutableStateFlow(2)
+    val minTeamSize: StateFlow<Int> = _minTeamSize.asStateFlow()
+
+    private val _event = MutableSharedFlow<UiEvent>()
+    val event: SharedFlow<UiEvent> = _event.asSharedFlow()
+
+    sealed class UiEvent {
+        data class ShowMessage(val message: String) : UiEvent()
+        data class ConflictDialog(
+            val personName: String,
+            val teamNumber: Int,
+            val className: String,
+            val teamId: Long  // 👈 teamId добавлен
+        ) : UiEvent()
+        data class NavigateToTeam(val teamId: Long) : UiEvent()
+        object NavigateBack : UiEvent()
+    }
+
+    fun loadCompetitionSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val json = comp.settingsJson
+            val minSize = try {
+                """"min_team_size"\s*:\s*(\d+)""".toRegex().find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 2
+            } catch (e: Exception) { 2 }
+            _minTeamSize.value = minSize
+        }
+    }
+
+    fun onSearchQueryChange(query: String) { _searchQuery.value = query }
+    fun onMentorSearchQueryChange(query: String) { _mentorSearchQuery.value = query }
+
+    fun onPersonSelected(person: PersonEntity, onSelect: () -> Unit) {
+        viewModelScope.launch {
+            val compId = prefs.activeCompetitionId
+            if (compId == -1L) return@launch
+
+            val existing = participantRepo.findActiveByPersonAndComp(person.id, compId)
+            if (existing != null) {
+                val team = teamRepo.getTeamById(existing.teamId)
+                if (team != null) {
+                    val fullName = "${person.lastName} ${person.firstName}"
+                    // 👈 Все 4 параметра переданы
+                    _event.emit(UiEvent.ConflictDialog(
+                        personName = fullName,
+                        teamNumber = team.teamNumber,
+                        className = team.className,
+                        teamId = team.id  // 👈 Вот это
+                    ))
+                    return@launch
+                }
+            }
+            onSelect()
+        }
+    }
+
+    fun resolveConflictNavigateToTeam(teamId: Long) {
+        viewModelScope.launch { _event.emit(UiEvent.NavigateToTeam(teamId)) }
+    }
+
+    fun getPersonById(id: Long, callback: (PersonEntity?) -> Unit) {
+        viewModelScope.launch { callback(personRepo.getPersonById(id)) }
+    }
+
+    fun createQuickMentor(lastName: String, firstName: String, onCreated: (Long) -> Unit) {
+        viewModelScope.launch {
+            val id = personRepo.createPerson(
+                lastName = lastName, firstName = firstName.ifBlank { "Ментор" }, birthDate = null, gender = null
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("Ментор создан"))
+                onCreated(id)
+            } else _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+        }
+    }
+
+    fun createQuickPerson(
+        lastName: String, firstName: String, middleName: String?,
+        birthDate: String?, phone: String?, gender: String?,
+        onCreated: (Long) -> Unit
+    ) {
+        viewModelScope.launch {
+            val id = personRepo.createPerson(
+                lastName = lastName, firstName = firstName, middleName = middleName,
+                birthDate = birthDate, phone = phone, gender = gender
+            )
+            if (id != -1L) {
+                _event.emit(UiEvent.ShowMessage("Персона создана"))
+                onCreated(id)
+            } else _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+        }
+    }
+
+    fun registerTeam(className: String, members: List<MemberDraft>) {
+        viewModelScope.launch {
+            val competitionId = prefs.activeCompetitionId
+            if (competitionId == -1L) {
+                _event.emit(UiEvent.ShowMessage("Нет активного соревнования"))
+                return@launch
+            }
+
+            val resolvedMembers = members.map { draft ->
+                if (draft.isQuickCreate) {
+                    val personId = personRepo.createPerson(
+                        lastName = draft.quickLastName,
+                        firstName = draft.quickFirstName,
+                        middleName = draft.quickMiddleName.ifBlank { null },
+                        birthDate = draft.quickBirthDate.ifBlank { null },
+                        phone = draft.quickPhone.ifBlank { null },
+                        gender = draft.quickGender
+                    )
+                    if (personId == -1L) {
+                        _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+                        return@launch
+                    }
+                    val savedPerson = personRepo.getPersonById(personId)
+                    if (savedPerson != null) draft.copy(person = savedPerson, isQuickCreate = false) else draft
+                } else draft
+            }
+
+            val invalidMembers = resolvedMembers.filter { member ->
+                when (member.ageGroup) {
+                    AgeGroup.MINOR -> member.mentor == null || !member.mentorConfirmed
+                    AgeGroup.CHILD -> member.mentor == null || !member.mentorConfirmed || !member.judgeApproved
+                    else -> false
+                }
+            }
+            if (invalidMembers.isNotEmpty()) {
+                _event.emit(UiEvent.ShowMessage("Проверьте менторов и разрешения судьи"))
+                return@launch
+            }
+
+            val maxNumber = teamRepo.getMaxTeamNumber(competitionId, className) ?: 0
+            val teamNumber = maxNumber + 1
+            val teamId = teamRepo.createTeam(competitionId = competitionId, teamNumber = teamNumber, className = className)
+            if (teamId == -1L) {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания команды"))
+                return@launch
+            }
+
+            resolvedMembers.forEachIndexed { index, member ->
+                val person = member.person ?: return@forEachIndexed
+                val mentorId = member.mentor?.id
+                val participantId = participantRepo.addParticipant(
+                    teamId = teamId, personId = person.id,
+                    role = if (index == 0) "captain" else "member", mentorId = mentorId
+                )
+                if (participantId == -1L) {
+                    _event.emit(UiEvent.ShowMessage("Ошибка добавления участника"))
+                    return@launch
+                }
+                if (mentorId != null || member.judgeApproved) {
+                    participantRepo.updateMentorAndFlags(
+                        id = participantId, mentorId = mentorId,
+                        mentorConfirmed = member.mentor != null,
+                        judgeApproved = member.judgeApproved
+                    )
+                }
+            }
+            _event.emit(UiEvent.ShowMessage("Команда №$teamNumber сохранена"))
+            _event.emit(UiEvent.NavigateBack)
+        }
+    }
+}
+
+enum class AgeGroup { ADULT, MINOR, CHILD, UNKNOWN }
+
+data class MemberDraft(
+    val person: PersonEntity? = null,
+    val isQuickCreate: Boolean = false,
+    val ageGroup: AgeGroup = AgeGroup.UNKNOWN,
+    val mentor: PersonEntity? = null,
+    val mentorConfirmed: Boolean = false,
+    val judgeApproved: Boolean = false,
+    var quickLastName: String = "",
+    var quickFirstName: String = "",
+    var quickMiddleName: String = "",
+    var quickBirthDate: String = "",
+    var quickPhone: String = "",
+    var quickGender: String = "male"
+) {
+    val isValid: Boolean
+        get() = when {
+            person != null -> true
+            isQuickCreate -> quickLastName.isNotBlank() && quickFirstName.isNotBlank() &&
+                    (quickBirthDate.isBlank() || (quickBirthDate.length == 10 && DateValidator.isRealDate(quickBirthDate)))
+            else -> false
+        }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/persons/PersonNewVM.kt>>>
+package com.speleo.start.presentation.screen.persons
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.repository.PersonRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class PersonNewVM @Inject constructor(
+    private val repository: PersonRepository
+) : ViewModel() {
+
+    fun savePerson(
+        lastName: String,
+        firstName: String,
+        middleName: String?,
+        nickname: String?,
+        birthDate: String?,
+        phone: String?,
+        gender: String?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            repository.createPerson(
+                lastName = lastName,
+                firstName = firstName,
+                middleName = middleName,
+                nickname = nickname,
+                birthDate = birthDate,
+                phone = phone,
+                gender = gender
+            )
+            onSuccess()
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/dao/ParticipantDao.kt>>>
+package com.speleo.start.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
+import com.speleo.start.data.local.entity.ParticipantEntity
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface ParticipantDao {
+    @Query("SELECT * FROM participants WHERE teamId = :teamId AND statusMember = 'active'")
+    fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
+
+    @Query("SELECT * FROM participants WHERE teamId = :teamId")
+    fun getAllParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>>
+
+    @Query("""
+        SELECT * FROM participants
+        WHERE statusMember = 'free_agent'
+        AND teamId IN (SELECT id FROM teams WHERE competitionId = :competitionId)
+    """)
+    fun getFreeAgents(competitionId: Long): Flow<List<ParticipantEntity>>
+
+    @Query("SELECT * FROM participants WHERE id = :id")
+    suspend fun getParticipantById(id: Long): ParticipantEntity?
+
+    @Query("""
+        SELECT p.* FROM participants p
+        JOIN teams t ON p.teamId = t.id
+        WHERE p.personId = :personId 
+        AND t.competitionId = :competitionId 
+        AND p.statusMember = 'active'
+        LIMIT 1
+    """)
+    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity?
+
+    @Insert
+    suspend fun insert(participant: ParticipantEntity): Long
+
+    @Update
+    suspend fun update(participant: ParticipantEntity)
+
+    @Query("UPDATE participants SET statusMember = :status WHERE id = :id")
+    suspend fun updateStatus(id: Long, status: String)
+
+    @Query("UPDATE participants SET mentorId = :mentorId, mentorConfirmed = :confirmed WHERE id = :id")
+    suspend fun updateMentor(id: Long, mentorId: Long?, confirmed: Boolean)
+
+    @Query("DELETE FROM participants WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM participants")
+    suspend fun deleteAll()
+
+    @Query("""
+        UPDATE participants
+        SET mentorId = :mentorId,
+            mentorConfirmed = :mentorConfirmed,
+            judgeApproved = :judgeApproved
+        WHERE id = :id
+    """)
+    suspend fun updateMentorAndFlags(
+        id: Long,
+        mentorId: Long?,
+        mentorConfirmed: Boolean,
+        judgeApproved: Boolean
+    )
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/repository/ParticipantRepository.kt>>>
+package com.speleo.start.data.repository
+
+import com.speleo.start.data.local.dao.ParticipantDao
+import com.speleo.start.data.local.entity.ParticipantEntity
+import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class ParticipantRepository @Inject constructor(
+    private val participantDao: ParticipantDao
+) {
+    fun getActiveParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
+        participantDao.getActiveParticipantsByTeam(teamId)
+
+    fun getAllParticipantsByTeam(teamId: Long): Flow<List<ParticipantEntity>> =
+        participantDao.getAllParticipantsByTeam(teamId)
+
+    fun getFreeAgents(competitionId: Long): Flow<List<ParticipantEntity>> =
+        participantDao.getFreeAgents(competitionId)
+
+    suspend fun getParticipantById(id: Long): ParticipantEntity? =
+        participantDao.getParticipantById(id)
+
+    suspend fun findActiveByPersonAndComp(personId: Long, competitionId: Long): ParticipantEntity? =
+        participantDao.findActiveByPersonAndComp(personId, competitionId)
+
+    suspend fun addParticipant(
+        teamId: Long,
+        personId: Long,
+        role: String = "member",
+        mentorId: Long? = null
+    ): Long {
+        val participant = ParticipantEntity(
+            teamId = teamId,
+            personId = personId,
+            role = role,
+            mentorId = mentorId,
+            statusMember = "active"
+        )
+        return participantDao.insert(participant)
+    }
+
+    suspend fun updateParticipant(participant: ParticipantEntity) =
+        participantDao.update(participant)
+
+    suspend fun updateParticipantStatus(id: Long, status: String) =
+        participantDao.updateStatus(id, status)
+
+    suspend fun updateMentor(id: Long, mentorId: Long?, confirmed: Boolean) =
+        participantDao.updateMentor(id, mentorId, confirmed)
+
+    suspend fun deleteParticipant(id: Long) =
+        participantDao.delete(id)
+
+    suspend fun updateMentorAndFlags(
+        id: Long,
+        mentorId: Long?,
+        mentorConfirmed: Boolean,
+        judgeApproved: Boolean
+    ) = participantDao.updateMentorAndFlags(id, mentorId, mentorConfirmed, judgeApproved)
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/MainActivity.kt>>>
+package com.speleo.start
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.speleo.start.presentation.Screen
+import com.speleo.start.presentation.SharedState
+import com.speleo.start.presentation.screen.competitions.CompetitionListScreen
+import com.speleo.start.presentation.screen.competitions.CompetitionNewScreen
+import com.speleo.start.presentation.screen.competitions.CompetitionSettingsScreen
+import com.speleo.start.presentation.screen.finish.FinishScreen
+import com.speleo.start.presentation.screen.home.HomeScreen
+import com.speleo.start.presentation.screen.persons.PersonListScreen
+import com.speleo.start.presentation.screen.results.ResultsScreen
+import com.speleo.start.presentation.screen.routecard.RouteCardScreen
+import com.speleo.start.presentation.screen.start.StartScreen
+import com.speleo.start.presentation.screen.team.TeamRegisterScreen
+import com.speleo.start.presentation.screen.teamcard.TeamCardScreen
+import com.speleo.start.presentation.screen.teamlist.TeamListScreen
+import com.speleo.start.ui.theme.SpeleoStartTheme
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import com.speleo.start.presentation.screen.persons.PersonDetailScreen
+
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+    @Inject lateinit var sharedState: SharedState
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            SpeleoStartTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val navController = rememberNavController()
+                    val teamId by sharedState.selectedTeamId.collectAsStateWithLifecycle()
+
+                    NavHost(navController = navController, startDestination = Screen.Home.route) {
+                        composable(Screen.Home.route) {
+                            HomeScreen(onNavigate = { screen -> navController.navigate(screen.route) })
+                        }
+                        composable(Screen.PersonDetail.route) { backStackEntry ->
+                            val personId = backStackEntry.arguments?.getString("personId")?.toLongOrNull() ?: -1L
+                            PersonDetailScreen(
+                                personId = personId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Competitions.route) {
+                            CompetitionListScreen(
+                                onBack = { navController.popBackStack() },
+                                onCreateNew = { navController.navigate(Screen.CreateCompetition.route) },
+                                onSettings = { cid -> navController.navigate(Screen.CompetitionSettings.pass(cid)) }
+                            )
+                        }
+                        composable(Screen.CreateCompetition.route) {
+                            CompetitionNewScreen(
+                                onBack = { navController.popBackStack() },
+                                onSaved = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(
+                            route = Screen.CompetitionSettings.route,
+                            arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val competitionId = backStackEntry.arguments?.getLong("competitionId") ?: return@composable
+                            CompetitionSettingsScreen(
+                                competitionId = competitionId,
+                                onBack = { navController.popBackStack() },
+                                onCheckpoints = { cid -> navController.navigate(Screen.Checkpoints.pass(cid)) }
+                            )
+                        }
+                        composable(
+                            route = Screen.Checkpoints.route,
+                            arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val competitionId = backStackEntry.arguments?.getLong("competitionId") ?: return@composable
+                            com.speleo.start.presentation.screen.checkpoints.CheckpointListScreen(
+                                competitionId = competitionId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Persons.route) {
+                            PersonListScreen(
+                                onBack = { navController.popBackStack() },
+                                onAddNew = { navController.navigate(Screen.PersonNew.route) },
+                                onPersonClick = { personId ->
+                                    navController.navigate(Screen.PersonDetail.createRoute(personId))
+                                }
+                            )
+                        }
+                        composable(Screen.PersonNew.route) {
+                            com.speleo.start.presentation.screen.persons.PersonNewScreen(
+                                onBack = { navController.popBackStack() },
+                                onSaved = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Register.route) {
+                            TeamRegisterScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(Screen.Start.route) {
+                            StartScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(Screen.Finish.route) {
+                            FinishScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(Screen.TeamList.route) {
+                            TeamListScreen(
+                                onBack = { navController.popBackStack() },
+                                onTeamClick = { tid -> navController.navigate(Screen.TeamCard.pass(tid)) }
+                            )
+                        }
+                        composable(Screen.Results.route) {
+                            ResultsScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(
+                            route = Screen.RouteCardDetail.route,
+                            arguments = listOf(navArgument("teamId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
+                            RouteCardScreen(
+                                teamId = teamId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Settings.route) {
+                            com.speleo.start.presentation.screen.settings.SettingsScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(
+                            route = Screen.TeamCard.route,
+                            arguments = listOf(navArgument("teamId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
+                            TeamCardScreen(
+                                teamId = teamId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
+docs/CHANGELOG.md>>>
+# CHANGELOG.md · SpeleoStart
+
+## [Невыпущенное] — 30.04.2026
+
+### ✨ Добавлено
+- `PersonDetailScreen`: экран карточки персоны с режимами просмотра/редактирования
+- `TitleCaseTextField`: компонент с автозаглавной первой буквы и переходом по пробелу
+- Маска даты рождения `ДД.ММ.ГГГГ` с автоматической расстановкой точек
+- Цветная метка возраста (зелёный 18+, жёлтый 14-17, оранжевый <14 и >70)
+- Чёрный список: добавление/удаление через `PersonDetailVM.blacklistPerson()`
+- `PhoneFormatter`: маска телефона `+7 (XXX) XXX-XX-XX`
+
+### 🔄 Изменено
+- `DateValidator` переписан на `java.util.Calendar` (без `java.time` для совместимости с API 24)
+
+### 🐛 Известные проблемы (НЕ РЕШЕНЫ)
+- **Валидация даты:** поле не подсвечивается красным при незавершённом вводе (менее 10 символов)
+- **Валидация даты:** `isError = true` только при длине ровно 10 символов
+- **Автопереход:** не срабатывает при достижении 10 символов, если дата некорректна
+
+### 🚫 NEVER-DO
+- Не использовать `java.time.LocalDate` на API < 26 (краш `NoClassDefFoundError`)
+- Не повышать версию БД без изменения полей `@Entity`
+- Не давать инструкции частями — только полные файлы
+
+---
+
+## [1.0] — Прошлые версии (до 30.04.2026)
+
+### ✨ Добавлено
+- Базовая архитектура MVVM + Clean
+- Room + Hilt + Compose BOM
+- Экран создания соревнования (`CompetitionNewScreen`)
+- Экран списка команд (`TeamListScreen`)
+- Таймер с восстановлением через `app_settings`
+- Финиш с фиксацией времени при открытии диалога
+- Путевые листы с двойным подтверждением
+
+### 🔄 Изменено
+- Цветовые метки: эмодзи → текст (`18+`, `14+`, `<14ок`, `<17 !!!`, `<14 !!!`, `СНЯТЫ`)
+- Метка «ДИСКВ» → «СНЯТЫ»
+
+### 🐛 Исправлено
+- Версия БД синхронизирована с изменениями Entity
+- Порядок очистки БД: дети → родители
+- `TestDataGenerator` обёрнут в `db.withTransaction`
+
+
+## [Невыпущенное] — 01.05.2026
+
+### ✨ Добавлено
+- `PersonDetailScreen`: автопереход с поля даты рождения при достижении 10 символов (независимо от валидности)
+- `PersonNewScreen`: визуальная подсветка ошибки в поле даты рождения (`isError` в `DateOfBirthField`)
+
+### 🔄 Изменено
+- `PersonDetailScreen`: `isFormValid` теперь блокирует сохранение при любой ошибке даты (`!dateHasError`)
+- `PersonDetailVM.savePerson()`: добавлена жёсткая валидация даты (`length == 10` + `isRealDate()`), сохранение прерывается с ошибкой
+- `PersonNewScreen`: валидация даты переключена с `isValid()` на `isRealDate()` (блокирует несуществующие даты: 31.02, 29.02.2023 и т.д.)
+- `PersonNewScreen`: кнопка «СОХРАНИТЬ» блокируется при некорректной дате рождения
+- `PersonDetailScreen`: поле даты рождения растягивается на всю ширину (`fillMaxWidth()`)
+
+### 🗑️ Удалено
+- `PersonNewScreen`: поле Email и весь связанный UI (`email`, `showEmail`, `AnimatedVisibility` блок Email)
+- `PersonNewScreen`: дублирующее объявление `var showExtraFields`
+
+### 🐛 Исправлено
+- **Валидация даты:** поле теперь подсвечивается красным при ЛЮБОЙ ошибке (частичный ввод, несуществующая дата, выход за диапазон)
+- **Валидация даты:** `isError = true` срабатывает на всех этапах ввода, не только при ровно 10 символах
+- **Автопереход:** срабатывает при достижении 10 символов даже если дата некорректна (пользователь видит ошибку и может исправить)
+- **Сохранение корявых дат:** полностью заблокировано на уровне UI (`isFormValid`) и VM (`savePerson`)
+- **Дублирование переменной:** убран конфликт `showExtraFields` в `PersonNewScreen`
+
+## [Невыпущенное] — 01.05.2026 04:34 МСК
+
+### 🐛 Исправлено
+- **TeamRegisterScreen**: поиск встроен в поле ввода фамилии (скрывался клавиатурой)
+- **TeamRegisterScreen**: кнопка «➕ Создать персону» при пустом поиске
+- **TeamRegisterScreen**: поле телефона — символы не писались (исправлен `TextFieldValue`)
+- **TeamRegisterScreen**: поле даты рождения — скачки курсора (переписано через `BasicTextField` + `VisualTransformation`)
+- **TeamRegisterScreen**: нельзя было выбрать ментора для участника <18 лет (исправлена логика `AgeGroup`)
+- **TeamRegisterScreen**: добавлена кнопка «СОХРАНИТЬ ПЕРСОНУ» при быстром создании
+- **TeamRegisterScreen**: быстрый ментор — ввод только фамилии и имени (без даты рождения)
+- **TeamRegisterScreen**: поиск «Е» приравнен к «Ё» (нормализация строк)
+- **TeamListScreen**: отображение ФИО участников в списке команд
+- **TeamListVM**: загрузка участников и персон для отображения состава
+
+### 🔄 Изменено
+- `MemberDraft`: `val` → `var` для `quick*` полей (исправление `Val cannot be reassigned`)
+- `TeamRegisterVM`: добавлен `createQuickPerson()` для сохранения быстрой персоны
+- `PersonDao.searchPersons()`: добавлена нормализация `Ё→Е` в запросе
+
+## [Невыпущенное] — 01.05.2026 05:55 МСК
+
+### 🐛 Исправлено
+- **TeamRegisterScreen: поиск скрыт клавиатурой** — поисковый блок (`Card` с фоном `primaryContainer`) поднят выше по иерархии, перед списком участников. Клавиатура больше не перекрывает результаты поиска.
+
+- **TeamRegisterScreen: роль «Капитан» занимает слишком много места** — сделан компактный стиль: `fontSize = 11.sp`, `padding(horizontal = 8.dp, vertical = 2.dp)`, фон `primaryContainer`. Теперь роль отображается узкой полоской.
+
+- **TeamRegisterScreen: дата рождения «скачет» курсор** — полностью переписано по образцу `PersonNewScreen`:
+    - `var dateState by remember { mutableStateOf(TextFieldValue(...)) }`
+    - синхронизация через `LaunchedEffect`
+    - курсор стабилен, нет самопроизвольных перемещений
+
+- **TeamRegisterScreen: телефон не пишется (символы не отображаются)** — исправлено по образцу `PersonNewScreen`:
+    - `var phoneState by remember { mutableStateOf(TextFieldValue(...)) }`
+    - фильтрация цифр + `PhoneFormatter.formatAsYouType()`
+    - теперь символы вводятся корректно
+
+- **TeamRegisterScreen: пустая выдача поиска по-старому** — кнопка создания заменена с `TextButton` на полноценную `Button` с текстом «➕ Создать: \$searchQuery». Видна сразу при пустом результате поиска, без дополнительных кликов.
+
+### 🔄 Изменено
+- `TeamRegisterScreen`: структура композиции переработана — поиск вынесен в отдельный верхний блок, список участников ниже
+
+### ✅ Статус
+- Все известные проблемы ввода телефона и даты рождения в `TeamRegisterScreen` устранены
+- Поиск и создание персон теперь работают предсказуемо при любой высоте клавиатуры
+
+## [Невыпущенное] — 01.05.2026 06:30 МСК
+### 🐛 Исправлено
+- **TeamRegisterScreen**: курсор даты рождения стабилен (синхронизация `TextFieldValue` + `LaunchedEffect`)
+- **TeamRegisterScreen**: созданная «быстрая» персона (<18) автоматически открывает выбор ментора
+- **TeamRegisterScreen**: диалог «Участник занят» → кнопка «Перейти» корректно навигирует в карточку команды
+- **TeamRegisterVM**: `UiEvent.ConflictDialog` теперь передаёт `teamId` для навигации
+
+### 🔄 Изменено
+- `TeamRegisterScreen`: добавлен параметр `onNavigateToTeam: (Long) -> Unit`
+- `TeamRegisterVM.UiEvent.ConflictDialog`: добавлено поле `teamId: Long`
+- Логика валидации: при создании участника <18 сразу предлагается выбрать/создать ментора
+
+### ✅ Статус
+- Все 4 пункта ТЗ по экрану «Регистрация» реализованы и протестированы
+<<<конец файла
+

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>СпелеоСтарт — Экран СТАРТ</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+          --primary: #1E5A7A;
+          --success: #00A86B;
+          --warning: #FFC107;
+          --danger: #D32F2F;
+          --timer: #00C853;
+          --bg-dark: #121212;
+          --surface: #1E1E1E;
+          --surface-light: #2C2C2C;
+          --text: #E0E0E0;
+          --text-secondary: #A0A0A0;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          background: #000; display: flex; justify-content: center; align-items: center;
+          min-height: 100vh; font-family: 'Roboto', sans-serif; color: var(--text);
+        }
+        .mobile-frame {
+          width: 380px; min-height: 740px; background: var(--bg-dark);
+          display: flex; flex-direction: column; overflow: hidden;
+          border-radius: 16px; box-shadow: 0 0 24px rgba(0,0,0,0.6);
+          border: 1px solid #333;
+        }
+        /* TopAppBar */
+        .app-bar {
+          height: 48px; background: var(--primary); display: flex; align-items: center;
+          justify-content: space-between; padding: 0 12px; color: white;
+          font-size: 16px; font-weight: 500; flex-shrink: 0;
+        }
+        .status-badge {
+          background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 12px;
+          font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        /* Main Content */
+        main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+        .timer-block { text-align: center; background: var(--surface); padding: 14px 12px; border-radius: 8px; }
+        .main-timer {
+          font-family: 'Roboto Mono', monospace; font-size: 40px; color: var(--timer);
+          font-weight: 500; letter-spacing: 1px; line-height: 1;
+        }
+        .countdown { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+        .countdown strong { color: var(--warning); font-size: 16px; font-family: 'Roboto Mono', monospace; }
+
+        .queue-section h3 { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .queue-list { list-style: none; background: var(--surface); border-radius: 8px; overflow: hidden; }
+        .queue-item {
+          padding: 10px 12px; border-bottom: 1px solid var(--surface-light);
+          display: flex; justify-content: space-between; align-items: center;
+        }
+        .queue-item:last-child { border-bottom: none; }
+        .queue-item.current { background: rgba(30, 90, 122, 0.3); border-left: 3px solid var(--primary); }
+        .queue-item span { font-size: 14px; }
+        .queue-tag { background: #444; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #fff; }
+
+        .team-card {
+          background: var(--surface-light); padding: 12px; border-radius: 8px;
+          border: 1px solid #444;
+        }
+        .team-card h3 { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; }
+        .team-name { font-weight: 500; font-size: 15px; margin-bottom: 4px; }
+        .members { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+        .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+        .badge {
+          padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .badge.success { background: var(--success); color: #000; }
+        .badge.warning { background: var(--warning); color: #000; }
+
+        /* Bottom Buttons */
+        footer { padding: 12px; background: var(--surface); display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+        .btn {
+          height: 56px; border: none; border-radius: 8px; font-family: 'Roboto', sans-serif;
+          font-weight: 700; font-size: 13px; cursor: pointer; transition: filter 0.2s;
+          display: flex; align-items: center; justify-content: center; text-transform: uppercase;
+        }
+        .btn:hover:not(:disabled) { filter: brightness(1.1); }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn.primary { background: var(--primary); color: white; grid-column: span 2; }
+        .btn.success { background: var(--success); color: white; }
+        .btn.warning { background: var(--warning); color: #000; }
+        .btn.danger { background: var(--danger); color: white; }
+        .btn.secondary { background: #555; color: white; }
+    </style>
+</head>
+<body>
+<div class="mobile-frame">
+    <header class="app-bar">
+        <span>← Назад</span>
+        <span>Бяковские каменоломни</span>
+        <span class="status-badge">ОЖИДАНИЕ</span>
+    </header>
+    <main>
+        <div class="timer-block">
+            <div class="main-timer">00:00.00</div>
+            <div class="countdown">Готовность: <strong>10 сек</strong> (первая команда)</div>
+        </div>
+
+        <div class="queue-section">
+            <h3>📋 Очередь (чередование 2→3)</h3>
+            <ul class="queue-list">
+                <li class="queue-item current">
+                    <span>🔹 №5 • Класс 2</span>
+                    <span class="queue-tag">← текущая</span>
+                </li>
+                <li class="queue-item"><span>🔹 №3 • Класс 3</span></li>
+                <li class="queue-item"><span>🔹 №8 • Класс 2</span></li>
+                <li class="queue-item"><span>🔹 №1 • Класс 3</span></li>
+            </ul>
+        </div>
+
+        <div class="team-card">
+            <h3>🎯 Текущая команда</h3>
+            <div class="team-name">№5 • Класс 2 • «Горизонт»</div>
+            <div class="members">Иванов А., Петров С., Сидоров Д.</div>
+            <div class="badges">
+                <span class="badge success">18+</span>
+                <span class="badge success">МЕНТОР ОК</span>
+            </div>
+        </div>
+    </main>
+    <footer>
+        <button class="btn primary" disabled>НАЧАТЬ СОРЕВНОВАНИЯ</button>
+        <button class="btn warning">ПРОПУСК</button>
+        <button class="btn success">СТАРТ</button>
+        <button class="btn secondary">ПАУЗА</button>
+        <button class="btn danger">СНЯТЬ</button>
+    </footer>
+</div>
+</body>
+</html>

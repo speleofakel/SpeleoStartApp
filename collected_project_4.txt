@@ -1,3 +1,1653 @@
+app/src/main/java/com/speleo/start/presentation/screen/start/StartScreen.kt>>>
+package com.speleo.start.presentation.screen.start
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.presentation.component.NoActiveCompetitionScreen
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun StartScreen(
+    onBack: () -> Unit,
+    onNavigateToCompetitions: () -> Unit = {},
+    onNavigateToTeamCard: (Long) -> Unit = {},
+    onNavigateToFinish: () -> Unit = {},
+    vm: StartVM = hiltViewModel()
+) {
+    val mainTimer by vm.timer.mainTimer.collectAsStateWithLifecycle()
+    val countdown by vm.timer.countdown.collectAsStateWithLifecycle()
+    val countdownPaused by vm.timer.countdownPaused.collectAsStateWithLifecycle()
+    val started by vm.timer.started.collectAsStateWithLifecycle()
+    val isFirstStart by vm.timer.isFirstStart.collectAsStateWithLifecycle()
+    val queue by vm.queue.collectAsStateWithLifecycle()
+    val hasActiveCompetition by vm.hasActiveCompetition.collectAsStateWithLifecycle()
+    val validationError by vm.validationError.collectAsStateWithLifecycle()
+    val startInterval by vm.startInterval.collectAsStateWithLifecycle()
+    val navigateToTeamCard by vm.navigateToTeamCard.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadQueue() }
+    LaunchedEffect(queue) { vm.clearValidationError() }
+
+    // Навигация к карточке команды
+    LaunchedEffect(navigateToTeamCard) {
+        navigateToTeamCard?.let {
+            onNavigateToTeamCard(it)
+            vm.onTeamCardNavigated()
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("СТАРТ", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    TextButton(onClick = onBack) {
+                        Text("◀", fontSize = 18.sp)
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            if (started) {
+                FloatingActionButton(
+                    onClick = onNavigateToFinish,
+                    shape = CircleShape,
+                    containerColor = Color(0xFFD32F2F),
+                    contentColor = Color.White,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Text("🏁", fontSize = 24.sp)
+                }
+            }
+        }
+    ) { padding ->
+        if (!hasActiveCompetition) {
+            NoActiveCompetitionScreen(
+                onNavigateToCompetitions = onNavigateToCompetitions,
+                message = "Нет активного соревнования"
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // ===== ГЛАВНЫЙ ТАЙМЕР (непаузится) =====
+                TimerDisplay(mainTimer)
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // ===== ОБРАТНЫЙ ОТСЧЁТ =====
+                if (started) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = formatCountdown(countdown),
+                                fontSize = if (countdown < 60) 40.sp else 32.sp,
+                                color = when {
+                                    countdown <= 10 -> Color(0xFFD32F2F)
+                                    countdown <= 30 -> Color(0xFFFF8C00)
+                                    else -> Color(0xFFFFC107)
+                                },
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            val nextTeam = queue.firstOrNull()
+                            if (nextTeam != null) {
+                                Text(
+                                    text = "ДО СТАРТА: КОМАНДА #${nextTeam.number} (${nextTeam.className} КЛ)",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // Кнопка паузы обратного отсчёта (только если > 10 сек)
+                            if (countdown > 10) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                OutlinedButton(
+                                    onClick = { vm.timer.toggleCountdownPause(canPause = true) },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
+                                    Text(
+                                        if (countdownPaused) "▶ ПУСК ОТСЧЁТА" else "⏸ ПАУЗА ОТСЧЁТА",
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            } else if (countdown <= 10 && countdown > 0) {
+                                Text(
+                                    text = "🔊 ЗВУКОВАЯ ИНДИКАЦИЯ АКТИВНА",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFD32F2F),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // ===== КНОПКА НАЧАТЬ СОРЕВНОВАНИЯ =====
+                if (!started) {
+                    Button(
+                        onClick = { vm.timer.startCompetition(startInterval) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Text("НАЧАТЬ СОРЕВНОВАНИЯ", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // ===== КАРТОЧКА СТАРТУЮЩЕЙ КОМАНДЫ =====
+                val currentTeam = queue.firstOrNull()
+                if (currentTeam != null && started) {
+                    ActiveTeamCard(
+                        team = currentTeam,
+                        onDisqualify = { vm.disqualifyCurrentTeam() },
+                        onSkip = { vm.skipCurrentTeam() },
+                        onStart = { vm.startCurrentTeam() },
+                        onNavigateToTeamCard = { vm.onTeamClick(currentTeam.id) }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // ===== ОШИБКА ВАЛИДАЦИИ =====
+                if (validationError != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Text(
+                            text = "❌ ${validationError?.message}",
+                            modifier = Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // ===== ОЧЕРЕДЬ =====
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "ОЧЕРЕДЬ",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "2 кл ▼  3 кл ▼",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(queue.drop(1), key = { it.id }) { team ->
+                        QueueItem(
+                            team = team,
+                            index = queue.indexOf(team),
+                            interval = startInterval,
+                            onClick = { vm.onTeamClick(team.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ActiveTeamCard(
+    team: StartTeamInfo,
+    onDisqualify: () -> Unit,
+    onSkip: () -> Unit,
+    onStart: () -> Unit,
+    onNavigateToTeamCard: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Верхняя часть — кликабельная для перехода к карточке
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onNavigateToTeamCard
+                    )
+                    .padding(12.dp)
+            ) {
+                // Заголовок
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = "#${team.number}",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Column {
+                            Text(
+                                "КОМАНДА #${team.number}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                "${team.className}-й класс · ${team.memberCount} участника",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // Цветовая метка по спеку
+                    val (markColor, markText) = when (team.colorMark) {
+                        "18+" -> Color(0xFF00A86B) to "18+"
+                        "14+" -> Color(0xFFFFC107) to "14+"
+                        "<14ок" -> Color(0xFFFFC107) to "<14ок"
+                        "<17 !!!" -> Color(0xFFFF8C00) to "<17 !!!"
+                        "<14 !!!" -> Color(0xFFFF8C00) to "<14 !!!"
+                        "СНЯТЫ" -> Color(0xFFD32F2F) to "СНЯТЫ"
+                        else -> Color(0xFF00A86B) to "18+"
+                    }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = markColor),
+                        modifier = Modifier.padding(start = 4.dp)
+                    ) {
+                        Text(
+                            markText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            color = if (markColor == Color(0xFFFFC107)) Color.Black else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Состав команды
+                team.members.forEach { member ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "● ${member.lastName} ${member.firstName.firstOrNull()?.plus(".") ?: ""}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            if (member.role == "капитан") {
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                    ),
+                                    modifier = Modifier.padding(start = 4.dp)
+                                ) {
+                                    Text(
+                                        "КАП",
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.dp),
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                        // Ментор / возраст
+                        if (member.age < 18) {
+                            val mentorStatus = when {
+                                member.mentorName == null -> "⚠️ Нет ментора"
+                                !member.mentorConfirmed -> "⚠️ Ментор не подтверждён"
+                                else -> "✓ ${member.mentorName}"
+                            }
+                            Text(
+                                mentorStatus,
+                                fontSize = 10.sp,
+                                color = if (member.mentorConfirmed) Color(0xFF00A86B) else Color(0xFFFF8C00)
+                            )
+                        } else {
+                            Text(
+                                "${member.age} лет",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
+
+                // Предупреждения
+                if (team.hasMentorIssues) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "⚠️ Требуется подтверждение ментора для участников <18",
+                        fontSize = 11.sp,
+                        color = Color(0xFFFF8C00),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // КНОПКИ ДЕЙСТВИЙ — равной ширины, в ряд
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onDisqualify,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text("СНЯТЬ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = onSkip,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text("ПРОПУСК", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B)),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text("▶ СТАРТ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QueueItem(
+    team: StartTeamInfo,
+    index: Int,
+    interval: Int,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val estimatedSec = index * interval
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Drag handle
+                Text(
+                    "☰",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text(
+                        "#${team.number}",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column {
+                    Text(
+                        "Команда #${team.number}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "${team.className}-й класс · ${team.memberCount} участника",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Text(
+                if (estimatedSec < 60) "~${estimatedSec}с" else "~${estimatedSec / 60}:${String.format("%02d", estimatedSec % 60)}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+}
+
+@Composable
+fun TimerDisplay(millis: Long, modifier: Modifier = Modifier) {
+    val totalSec = millis / 1000
+    val hours = totalSec / 3600
+    val minutes = (totalSec % 3600) / 60
+    val seconds = totalSec % 60
+    val hundredths = (millis % 1000) / 10
+
+    val baseSize = 48.sp
+    val smallSize = 28.sp
+    val timerColor = Color(0xFF00C853)
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                if (hours > 0) {
+                    Text(
+                        "%02d:".format(hours),
+                        fontSize = baseSize,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = timerColor
+                    )
+                } else {
+                    Text(
+                        "00:",
+                        fontSize = smallSize,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = timerColor.copy(alpha = 0.4f)
+                    )
+                }
+                Text(
+                    "%02d:%02d".format(minutes, seconds),
+                    fontSize = baseSize,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = timerColor
+                )
+                Text(
+                    ".%02d".format(hundredths),
+                    fontSize = smallSize,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = timerColor
+                )
+            }
+            Text(
+                "ГЛАВНЫЙ ТАЙМЕР",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Формат обратного отсчёта: СС если < 60, ММ:СС если ≥ 60
+ */
+private fun formatCountdown(seconds: Int): String {
+    return if (seconds < 60) {
+        "%02d".format(seconds)
+    } else {
+        "%02d:%02d".format(seconds / 60, seconds % 60)
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/start/StartVM.kt>>>
+package com.speleo.start.presentation.screen.start
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.local.entity.ParticipantEntity
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.presentation.TimerManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class StartMemberInfo(
+    val personId: Long,
+    val lastName: String,
+    val firstName: String,
+    val role: String,
+    val age: Int,
+    val mentorName: String? = null,
+    val mentorConfirmed: Boolean = false
+)
+
+data class StartTeamInfo(
+    val id: Long,
+    val number: Int,
+    val className: String,
+    val members: List<StartMemberInfo> = emptyList(),
+    val memberCount: Int = 0,
+    val hasMentorIssues: Boolean = false,
+    val hasInactiveMembers: Boolean = false,
+    val colorMark: String = "18+"
+)
+
+data class StartValidationError(
+    val message: String,
+    val canProceed: Boolean = false
+)
+
+@HiltViewModel
+class StartVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val participantRepo: ParticipantRepository,
+    private val personRepo: PersonRepository,
+    private val competitionRepo: CompetitionRepository,
+    private val prefs: PreferencesManager,
+    val timer: TimerManager
+) : ViewModel() {
+
+    private val _queue = MutableStateFlow<List<StartTeamInfo>>(emptyList())
+    val queue: StateFlow<List<StartTeamInfo>> = _queue.asStateFlow()
+
+    private val _hasActiveCompetition = MutableStateFlow(false)
+    val hasActiveCompetition: StateFlow<Boolean> = _hasActiveCompetition.asStateFlow()
+
+    private val _validationError = MutableStateFlow<StartValidationError?>(null)
+    val validationError: StateFlow<StartValidationError?> = _validationError.asStateFlow()
+
+    private val _startInterval = MutableStateFlow(TimerManager.DEFAULT_START_INTERVAL)
+    val startInterval: StateFlow<Int> = _startInterval.asStateFlow()
+
+    private val _navigateToTeamCard = MutableStateFlow<Long?>(null)
+    val navigateToTeamCard: StateFlow<Long?> = _navigateToTeamCard.asStateFlow()
+
+    init {
+        timer.restoreFromSavedState()
+        checkActiveCompetition()
+        loadStartInterval()
+    }
+
+    fun onTeamCardNavigated() {
+        _navigateToTeamCard.value = null
+    }
+
+    private fun checkActiveCompetition() {
+        val cid = prefs.activeCompetitionId
+        _hasActiveCompetition.value = cid != -1L
+    }
+
+    private fun loadStartInterval() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val interval = parseIntervalFromSettings(comp.settingsJson)
+            _startInterval.value = interval
+        }
+    }
+
+    private fun parseIntervalFromSettings(settingsJson: String?): Int {
+        if (settingsJson.isNullOrBlank()) return TimerManager.DEFAULT_START_INTERVAL
+        return try {
+            val regex = """"start_interval"\s*:\s*(\d+)""".toRegex()
+            regex.find(settingsJson)?.groupValues?.get(1)?.toInt() ?: TimerManager.DEFAULT_START_INTERVAL
+        } catch (e: Exception) {
+            TimerManager.DEFAULT_START_INTERVAL
+        }
+    }
+
+    private fun parseMinTeamSizeFromSettings(settingsJson: String?): Int {
+        if (settingsJson.isNullOrBlank()) return 2
+        return try {
+            val regex = """"min_team_size"\s*:\s*(\d+)""".toRegex()
+            regex.find(settingsJson)?.groupValues?.get(1)?.toInt() ?: 2
+        } catch (e: Exception) {
+            2
+        }
+    }
+
+    fun loadQueue() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) {
+                _queue.value = emptyList()
+                return@launch
+            }
+
+            teamRepo.getRegisteredTeamsByClass(cid, "2")
+                .combine(teamRepo.getRegisteredTeamsByClass(cid, "3")) { c2, c3 ->
+                    val maxSize = maxOf(c2.size, c3.size)
+                    val result = mutableListOf<StartTeamInfo>()
+                    for (i in 0 until maxSize) {
+                        if (i < c2.size) result.add(enrichTeamInfo(c2[i]))
+                        if (i < c3.size) result.add(enrichTeamInfo(c3[i]))
+                    }
+                    result
+                }
+                .collect { _queue.value = it }
+        }
+    }
+
+    private suspend fun enrichTeamInfo(team: com.speleo.start.data.local.entity.TeamEntity): StartTeamInfo {
+        // Получаем участников команды
+        val participantsFlow = participantRepo.getParticipantsByTeam(team.id)
+        val participants = participantsFlow.first()
+
+        // Собираем информацию об участниках
+        val memberInfos = mutableListOf<StartMemberInfo>()
+        for (participant in participants) {
+            val person = personRepo.getPersonById(participant.personId)
+            val age = person?.let { calculateAge(it.birthDate) } ?: 0
+
+            val mentor = participant.mentorId?.let { mid ->
+                personRepo.getPersonById(mid)
+            }
+
+            val mentorName = mentor?.let { m ->
+                "${m.lastName} ${m.firstName.firstOrNull()?.plus(".") ?: ""}"
+            }
+
+            memberInfos.add(
+                StartMemberInfo(
+                    personId = participant.personId,
+                    lastName = person?.lastName ?: "???",
+                    firstName = person?.firstName ?: "???",
+                    role = if (participant.role == "captain") "капитан" else "участник",
+                    age = age,
+                    mentorName = mentorName,
+                    mentorConfirmed = participant.mentorConfirmed == true
+                )
+            )
+        }
+
+        // Проверка менторов для <18
+        val hasMentorIssues = memberInfos.any { member ->
+            if (member.age < 18) {
+                member.mentorName == null || !member.mentorConfirmed
+            } else {
+                false
+            }
+        }
+
+        // Проверка неактивных участников
+        val hasInactive = participants.any { participant ->
+            participant.status != "active"
+        }
+
+        // Цветовая метка по спеку SPEC_MASTER.md §2
+        val colorMark = when {
+            hasInactive -> "СНЯТЫ"
+            memberInfos.all { it.age >= 18 } -> "18+"
+            memberInfos.any { it.age < 14 } -> if (hasMentorIssues) "<14 !!!" else "<14ок"
+            memberInfos.any { it.age in 14..17 } -> if (hasMentorIssues) "<17 !!!" else "14+"
+            else -> "18+"
+        }
+
+        return StartTeamInfo(
+            id = team.id,
+            number = team.teamNumber,
+            className = team.className,
+            members = memberInfos,
+            memberCount = participants.size,
+            hasMentorIssues = hasMentorIssues,
+            hasInactiveMembers = hasInactive,
+            colorMark = colorMark
+        )
+    }
+
+    private fun calculateAge(birthDate: String?): Int {
+        if (birthDate.isNullOrBlank() || birthDate.length != 10) return 0
+        return try {
+            val day = birthDate.substring(0, 2).toInt()
+            val month = birthDate.substring(3, 5).toInt()
+            val year = birthDate.substring(6, 10).toInt()
+
+            val now = java.util.Calendar.getInstance()
+            val birth = java.util.Calendar.getInstance().apply { set(year, month - 1, day) }
+
+            var age = now.get(java.util.Calendar.YEAR) - birth.get(java.util.Calendar.YEAR)
+            if (now.get(java.util.Calendar.DAY_OF_YEAR) < birth.get(java.util.Calendar.DAY_OF_YEAR)) {
+                age--
+            }
+            age
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    fun skipCurrentTeam() {
+        viewModelScope.launch {
+            val currentQueue = _queue.value
+            if (currentQueue.isEmpty()) return@launch
+
+            val first = currentQueue.first()
+
+            // Нельзя пропустить первую команду (Logic_Processes.md §2)
+            val cid = prefs.activeCompetitionId
+            val allTeams = teamRepo.getTeamsByCompetition(cid).first()
+            val startedCount = allTeams.count { it.status == "started" }
+
+            if (startedCount == 0) {
+                _validationError.value = StartValidationError(
+                    message = "Нельзя пропустить первую команду",
+                    canProceed = false
+                )
+                return@launch
+            }
+
+            teamRepo.incrementSkipCount(first.id)
+            timer.resetCountdown(_startInterval.value)
+            loadQueue()
+        }
+    }
+
+    fun startCurrentTeam() {
+        viewModelScope.launch {
+            val currentQueue = _queue.value
+            if (currentQueue.isEmpty()) return@launch
+
+            val first = currentQueue.first()
+
+            // Валидация 1: минимальный состав
+            val cid = prefs.activeCompetitionId
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val minSize = parseMinTeamSizeFromSettings(comp.settingsJson)
+
+            if (first.memberCount < minSize) {
+                _validationError.value = StartValidationError(
+                    message = "Недостаточно участников: ${first.memberCount} из $minSize",
+                    canProceed = false
+                )
+                return@launch
+            }
+
+            // Валидация 2: неактивные участники
+            if (first.hasInactiveMembers) {
+                _validationError.value = StartValidationError(
+                    message = "Есть неактивные участники",
+                    canProceed = false
+                )
+                return@launch
+            }
+
+            // Валидация 3: менторы для <18
+            if (first.hasMentorIssues) {
+                _validationError.value = StartValidationError(
+                    message = "Не все менторы подтверждены для участников <18",
+                    canProceed = false
+                )
+                return@launch
+            }
+
+            // Всё ок — стартуем
+            teamRepo.updateTeamStatus(first.id, "started")
+            teamRepo.setStartTimestamp(first.id, System.currentTimeMillis())
+
+            val isFirst = !timer.isFirstStart.value
+            timer.resetCountdown(_startInterval.value, isFirst = isFirst)
+
+            loadQueue()
+            _validationError.value = null
+        }
+    }
+
+    fun disqualifyCurrentTeam() {
+        viewModelScope.launch {
+            val currentQueue = _queue.value
+            if (currentQueue.isEmpty()) return@launch
+            val first = currentQueue.first()
+            teamRepo.updateTeamStatus(first.id, "disqualified")
+            timer.resetCountdown(_startInterval.value)
+            loadQueue()
+        }
+    }
+
+    fun onTeamClick(teamId: Long) {
+        _navigateToTeamCard.value = teamId
+    }
+
+    fun clearValidationError() {
+        _validationError.value = null
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterScreen.kt>>>
+package com.speleo.start.presentation.screen.team
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.presentation.component.TitleCaseTextField
+import com.speleo.start.util.DateValidator
+import com.speleo.start.util.PhoneFormatter
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.Icon
+import com.speleo.start.R
+
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TeamRegisterScreen(
+    onBack: () -> Unit,
+    onNavigateToTeam: (Long) -> Unit = {},
+    vm: TeamRegisterVM = hiltViewModel()
+) {
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by vm.searchResults.collectAsStateWithLifecycle()
+    val minTeamSize by vm.minTeamSize.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var selectedClass by remember { mutableStateOf("2") }
+    var members by remember { mutableStateOf(listOf<MemberDraft>()) }
+    var showMentorPickerFor by remember { mutableStateOf<Int?>(null) }
+    var mentorSearchQuery by remember { mutableStateOf("") }
+    var showConflictDialog by remember { mutableStateOf<Pair<String, TeamRegisterVM.UiEvent.ConflictDialog>?>(null) }
+    val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(Unit) {
+        vm.loadCompetitionSettings()
+        vm.event.collectLatest { event ->
+            when (event) {
+                is TeamRegisterVM.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
+                is TeamRegisterVM.UiEvent.NavigateBack -> onBack()
+                is TeamRegisterVM.UiEvent.ConflictDialog -> showConflictDialog = event.personName to event
+                is TeamRegisterVM.UiEvent.NavigateToTeam -> onNavigateToTeam(event.teamId)
+            }
+        }
+    }
+
+    val allRequirementsMet = remember(members) {
+        members.all { member ->
+            when (member.ageGroup) {
+                AgeGroup.ADULT -> true
+                AgeGroup.MINOR -> member.mentor != null && member.mentorConfirmed
+                AgeGroup.CHILD -> member.mentor != null && member.mentorConfirmed && member.judgeApproved
+                AgeGroup.UNKNOWN -> false
+            }
+        }
+    }
+    val canSave = members.size >= minTeamSize && allRequirementsMet && members.all { it.isValid }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(title = { Text("Регистрация команды") }, navigationIcon = {
+                TextButton(onClick = onBack) { Text("← Назад") }
+            })
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Класс:", fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("2" to "2-й класс", "3" to "3-й класс").forEach { (v, l) ->
+                    FilterChip(selected = selectedClass == v, onClick = { selectedClass = v }, label = { Text(l) })
+                }
+            }
+
+            val emptyIndex = members.indexOfFirst { it.person == null && !it.isQuickCreate }
+            if (emptyIndex >= 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("🔍 Поиск участника ${emptyIndex + 1}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Поле поиска с кнопками внутри (trailingIcon)
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { vm.onSearchQueryChange(it) },
+                            label = { Text("Фамилия") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, keyboardType = KeyboardType.Text),
+                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                            trailingIcon = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(end = 8.dp)  // 👈 Добавляем отступ справа
+                                ) {
+                                    // Кнопка "+" (создание)
+                                    IconButton(
+                                        onClick = {
+                                            if (searchQuery.isNotBlank()) {
+                                                members = members.toMutableList().also {
+                                                    it[emptyIndex] = members[emptyIndex].copy(
+                                                        isQuickCreate = true,
+                                                        quickLastName = searchQuery.trim()
+                                                    )
+                                                }
+                                                vm.onSearchQueryChange("")
+                                                focusManager.clearFocus()
+                                            }
+                                        },
+                                        enabled = searchQuery.isNotBlank(),
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .background(Color(0xFF4CAF50).copy(alpha = 0.4f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_action_add),
+                                                contentDescription = "Добавить",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Кнопка "✖" (очистка)
+                                    if (searchQuery.isNotBlank()) {
+                                        IconButton(
+                                            onClick = { vm.onSearchQueryChange("") },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .background(Color(0xFFF44336).copy(alpha = 0.4f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_action_clear),
+                                                    contentDescription = "Очистить",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Результаты поиска
+                        AnimatedVisibility(visible = searchResults.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                searchResults.forEach { person ->
+                                    PersonSearchResultItem(
+                                        person = person,
+                                        onClick = {
+                                            vm.onPersonSelected(person) {
+                                                members = members.toMutableList().also {
+                                                    it[emptyIndex] = members[emptyIndex].copy(
+                                                        person = person,
+                                                        ageGroup = calculateAgeGroup(person.birthDate),
+                                                        isQuickCreate = false
+                                                    )
+                                                }
+                                                vm.onSearchQueryChange("")
+                                                focusManager.clearFocus()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+
+
+                        // Сообщение "ничего не найдено" с кнопкой создания
+                        AnimatedVisibility(visible = searchQuery.length >= 2 && searchResults.isEmpty()) {
+                            Column {
+                                Text(
+                                    "Ничего не найдено",
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        members = members.toMutableList().also {
+                                            it[emptyIndex] = members[emptyIndex].copy(
+                                                isQuickCreate = true,
+                                                quickLastName = searchQuery.trim()
+                                            )
+                                        }
+                                        vm.onSearchQueryChange("")
+                                        focusManager.clearFocus()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_action_add),
+                                        contentDescription = "Добавить",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color(0xFF4CAF50).copy(alpha = 0.8f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Создать: ${searchQuery.trim()}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text("Участники (${members.size}/$minTeamSize мин.):", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+            members.forEachIndexed { index, member ->
+                MemberCard(
+                    index = index, member = member,
+                    onRemove = { members = members.toMutableList().also { it.removeAt(index) } },
+                    onToggleJudgeApproval = { members = members.toMutableList().also { it[index] = member.copy(judgeApproved = !member.judgeApproved) } },
+                    onOpenMentorPicker = { showMentorPickerFor = index },
+                    onRemoveMentor = { members = members.toMutableList().also { it[index] = member.copy(mentor = null, mentorConfirmed = false) } },
+                    onUpdateQuickFields = { updated -> members = members.toMutableList().also { it[index] = updated } },
+                    onAutoOpenMentor = { showMentorPickerFor = index },
+                    vm = vm
+                )
+            }
+
+            if (members.size < 6) {
+                OutlinedButton(
+                    onClick = { members = members + MemberDraft() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_action_add),
+                        contentDescription = "Добавить",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Добавить участника")
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = { vm.registerTeam(className = selectedClass, members = members) }, modifier = Modifier.fillMaxWidth(), enabled = canSave) {
+                Text("СОХРАНИТЬ КОМАНДУ")
+            }
+            if (!allRequirementsMet && members.isNotEmpty()) {
+                Text("⚠️ Проверьте менторов и разрешения судьи", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+
+    showConflictDialog?.let { (name, event) ->
+        AlertDialog(
+            onDismissRequest = { showConflictDialog = null },
+            title = { Text("Участник занят") },
+            text = { Text("$name уже числится в команде №${event.teamNumber} (${event.className}-й класс). Перейти в карточку команды?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConflictDialog = null
+                    onNavigateToTeam(event.teamId)
+                }) { Text("Перейти") }
+            },
+            dismissButton = { TextButton(onClick = { showConflictDialog = null }) { Text("Отмена") } }
+        )
+    }
+
+    if (showMentorPickerFor != null) {
+        val memberIndex = showMentorPickerFor!!
+        AlertDialog(
+            onDismissRequest = { showMentorPickerFor = null },
+            title = { Text("Выбор ментора") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = mentorSearchQuery,
+                        onValueChange = { mentorSearchQuery = it; vm.onMentorSearchQueryChange(it) },
+                        label = { Text("🔍 Фамилия ментора (≥18)") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val mentorResults by vm.mentorSearchResults.collectAsStateWithLifecycle()
+                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                        items(mentorResults) { person ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    members = members.toMutableList().also {
+                                        it[memberIndex] = members[memberIndex].copy(mentor = person, mentorConfirmed = true)
+                                    }
+                                    showMentorPickerFor = null; mentorSearchQuery = ""; vm.onMentorSearchQueryChange("")
+                                }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${person.lastName} ${person.firstName}", modifier = Modifier.weight(1f))
+                                val age = DateValidator.calculateAge(person.birthDate)
+                                if (age != null) Text("$age лет", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                    if (mentorResults.isEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        var qLast by remember { mutableStateOf("") }
+                        var qFirst by remember { mutableStateOf("") }
+                        val focusManager = LocalFocusManager.current
+
+                        TitleCaseTextField(
+                            value = qLast,
+                            onValueChange = { qLast = it },
+                            label = "Фамилия ментора",
+                            modifier = Modifier.fillMaxWidth(),
+                            imeAction = ImeAction.Next,
+                            onNext = {
+                                // Пробел или Enter → переход на поле "Имя ментора"
+                                focusManager.moveFocus(FocusDirection.Down)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        TitleCaseTextField(
+                            value = qFirst,
+                            onValueChange = { qFirst = it },
+                            label = "Имя ментора",
+                            modifier = Modifier.fillMaxWidth(),
+                            imeAction = ImeAction.Done,
+                            onNext = {
+                                // Пробел или Enter → убираем клавиатуру
+                                focusManager.clearFocus()
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(
+                            onClick = {
+                                if (qLast.isNotBlank() && qFirst.isNotBlank()) {
+                                    vm.createQuickMentor(lastName = qLast, firstName = qFirst) { newId ->
+                                        vm.getPersonById(newId) { person ->
+                                            person?.let {
+                                                members = members.toMutableList().also { list ->
+                                                    list[memberIndex] = list[memberIndex].copy(mentor = person, mentorConfirmed = true)
+                                                }
+                                            }
+                                        }
+                                        showMentorPickerFor = null
+                                        mentorSearchQuery = ""
+                                        vm.onMentorSearchQueryChange("")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = qLast.isNotBlank() && qFirst.isNotBlank()
+                        ) {
+                            Text("➕ СОЗДАТЬ И ПРИВЯЗАТЬ")
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showMentorPickerFor = null }) { Text("Отмена") } }
+        )
+    }
+}
+
+@Composable
+private fun PersonSearchResultItem(person: PersonEntity, onClick: () -> Unit) {
+    val age = DateValidator.calculateAge(person.birthDate)
+    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
+    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+    Card(modifier = Modifier.fillMaxWidth().clickable { onClick() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                Text(person.lastName.take(1).uppercase(), fontSize = 16.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("${person.lastName} ${person.firstName}", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                if (person.nickname != null) Text("«${person.nickname}»", fontSize = 11.sp, color = Color.Gray)
+            }
+            if (age != null) Text("$age лет", fontSize = 13.sp, color = ageColor)
+        }
+    }
+}
+
+@Composable
+private fun MemberCard(
+    index: Int, member: MemberDraft,
+    onRemove: () -> Unit, onToggleJudgeApproval: () -> Unit,
+    onOpenMentorPicker: () -> Unit, onRemoveMentor: () -> Unit,
+    onUpdateQuickFields: (MemberDraft) -> Unit,
+    onAutoOpenMentor: () -> Unit,
+    vm: TeamRegisterVM
+) {
+    // 👇 Защита: вычисляем effectiveAgeGroup если вдруг не задан
+    val effectiveAgeGroup = if (member.ageGroup != AgeGroup.UNKNOWN) {
+        member.ageGroup
+    } else if (member.person != null) {
+        calculateAgeGroup(member.person.birthDate)
+    } else {
+        AgeGroup.UNKNOWN
+    }
+
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+        containerColor = when {
+            member.person == null && !member.isQuickCreate -> MaterialTheme.colorScheme.surfaceVariant
+            !member.isValid -> MaterialTheme.colorScheme.errorContainer
+            else -> MaterialTheme.colorScheme.surface
+        }
+    )) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(if (index == 0) "👑 Капитан" else "👤 Участник", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.background(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small).padding(horizontal = 8.dp, vertical = 2.dp))
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Text("✕", fontSize = 14.sp, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            when {
+                member.isQuickCreate -> QuickCreateForm(member = member, onUpdate = onUpdateQuickFields, vm = vm, onAutoOpenMentor = onAutoOpenMentor)
+                member.person != null -> {
+                    val person = member.person!!
+                    val age = DateValidator.calculateAge(person.birthDate)
+                    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
+                    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                            Text(person.lastName.take(1).uppercase(), fontSize = 18.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${person.lastName} ${person.firstName}", fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                            if (age != null) Text("$age лет · ${ageMark.label}", fontSize = 12.sp, color = ageColor)
+                        }
+                    }
+                    // 👇 Используем effectiveAgeGroup вместо member.ageGroup
+                    when (effectiveAgeGroup) {
+                        AgeGroup.MINOR, AgeGroup.CHILD -> {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            if (member.mentor != null) MentorRow(mentor = member.mentor!!, onRemoveMentor = onRemoveMentor)
+                            else OutlinedButton(onClick = onOpenMentorPicker, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 4.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                                Text("⚠️ Ментор", fontSize = 12.sp)
+                            }
+                            if (effectiveAgeGroup == AgeGroup.CHILD) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(32.dp)) {
+                                    Checkbox(checked = member.judgeApproved, onCheckedChange = { onToggleJudgeApproval() }, modifier = Modifier.size(32.dp))
+                                    Text("Разрешено судьёй", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+                else -> Text("Введите фамилию в поле поиска выше", color = Color.Gray, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MentorRow(mentor: PersonEntity, onRemoveMentor: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("👨‍🏫 ${mentor.lastName} ${mentor.firstName}", fontSize = 13.sp, color = Color(0xFF1E5A7A))
+        TextButton(onClick = onRemoveMentor, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("Сменить", fontSize = 11.sp) }
+    }
+}
+
+@Composable
+private fun QuickCreateForm(
+    member: MemberDraft,
+    onUpdate: (MemberDraft) -> Unit,
+    vm: TeamRegisterVM,
+    onAutoOpenMentor: () -> Unit = {}
+) {
+    var showExtra by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val isDateValid = member.quickBirthDate.isBlank() || (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate))
+    val dateHasError = member.quickBirthDate.isNotBlank() && !isDateValid
+    val age = if (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate)) DateValidator.calculateAge(member.quickBirthDate) else null
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TitleCaseTextField(
+            value = member.quickLastName,
+            onValueChange = { onUpdate(member.copy(quickLastName = it)) },
+            label = "Фамилия",
+            modifier = Modifier.fillMaxWidth(),
+            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+        )
+        TitleCaseTextField(
+            value = member.quickFirstName,
+            onValueChange = { onUpdate(member.copy(quickFirstName = it)) },
+            label = "Имя",
+            modifier = Modifier.fillMaxWidth(),
+            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+        )
+
+        TextButton(
+            onClick = { showExtra = !showExtra },
+            contentPadding = PaddingValues(vertical = 0.dp)
+        ) {
+            Text(if (showExtra) "▾ Доп." else "▸ Доп.", fontSize = 12.sp)
+        }
+
+        AnimatedVisibility(visible = showExtra) {
+            TitleCaseTextField(
+                value = member.quickMiddleName,
+                onValueChange = { onUpdate(member.copy(quickMiddleName = it)) },
+                label = "Отчество",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Дата рождения
+        var dateState by remember {
+            mutableStateOf(TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length)))
+        }
+
+        LaunchedEffect(member.quickBirthDate) {
+            if (dateState.text != member.quickBirthDate) {
+                dateState = TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))
+            }
+        }
+
+        OutlinedTextField(
+            value = dateState,
+            onValueChange = { newVal ->
+                val oldCursor = newVal.selection.start
+                val digits = newVal.text.filter { it.isDigit() }.take(8)
+                val formatted = buildString {
+                    for (i in digits.indices) {
+                        if (i == 2 || i == 4) append(".")
+                        append(digits[i])
+                    }
+                }
+                val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
+                val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
+                val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
+
+                dateState = newVal.copy(text = formatted, selection = TextRange(newCursor))
+                onUpdate(member.copy(quickBirthDate = formatted))
+                if (formatted.length == 10) focusManager.moveFocus(FocusDirection.Down)
+            },
+            label = { Text(if (dateHasError) "Некорректная дата" else "Дата рождения") },
+            isError = dateHasError,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+        )
+
+        if (dateHasError) {
+            Text("Некорректная дата", color = Color(0xFFD32F2F), fontSize = 11.sp, modifier = Modifier.padding(start = 16.dp))
+        } else if (age != null) {
+            val color = when {
+                age < 14 -> Color(0xFFD32F2F)
+                age in 14..17 -> Color(0xFFFF8C00)
+                age > 70 -> Color(0xFFFF8C00)
+                else -> Color(0xFF00A86B)
+            }
+            Text("Возраст: $age лет", color = color, fontSize = 12.sp)
+        }
+
+        // Телефон
+        var phoneState by remember {
+            mutableStateOf(TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length)))
+        }
+
+        LaunchedEffect(member.quickPhone) {
+            if (phoneState.text != member.quickPhone) {
+                phoneState = TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length))
+            }
+        }
+
+        OutlinedTextField(
+            value = phoneState,
+            onValueChange = { newVal ->
+                val digits = newVal.text.filter { it.isDigit() }
+                val formatted = PhoneFormatter.formatAsYouType(digits)
+                phoneState = TextFieldValue(formatted, TextRange(formatted.length))
+                onUpdate(member.copy(quickPhone = formatted))
+            },
+            label = { Text("Телефон") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+        )
+
+        // Пол
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("male" to "М", "female" to "Ж").forEach { (v, l) ->
+                FilterChip(
+                    selected = member.quickGender == v,
+                    onClick = { onUpdate(member.copy(quickGender = v)) },
+                    label = { Text(l, fontSize = 12.sp) }
+                )
+            }
+        }
+
+        val canSavePerson = member.quickLastName.isNotBlank() && member.quickFirstName.isNotBlank() && isDateValid
+
+        Button(
+            onClick = {
+                vm.createQuickPerson(
+                    lastName = member.quickLastName,
+                    firstName = member.quickFirstName,
+                    middleName = member.quickMiddleName.ifBlank { null },
+                    birthDate = member.quickBirthDate.ifBlank { null },
+                    phone = member.quickPhone.ifBlank { null },
+                    gender = member.quickGender
+                ) { savedId ->
+                    vm.getPersonById(savedId) { person ->
+                        person?.let {
+                            onUpdate(member.copy(
+                                person = it,
+                                isQuickCreate = false,
+                                ageGroup = calculateAgeGroup(it.birthDate)
+                            ))
+                            val pAge = DateValidator.calculateAge(it.birthDate)
+                            if (pAge != null && pAge < 18) onAutoOpenMentor()
+                        }
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = canSavePerson
+        ) {
+            Text("💾 СОХРАНИТЬ", fontSize = 13.sp)
+        }
+    }
+}
+
+private fun calculateAgeGroup(birthDate: String?): AgeGroup {
+    val age = DateValidator.calculateAge(birthDate) ?: return AgeGroup.UNKNOWN
+    return when { age >= 18 -> AgeGroup.ADULT; age in 14..17 -> AgeGroup.MINOR; else -> AgeGroup.CHILD }
+}
+<<<конец файла
+
 app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterVM.kt>>>
 package com.speleo.start.presentation.screen.team
 
@@ -119,8 +1769,14 @@ class TeamRegisterVM @Inject constructor(
 
     fun createQuickMentor(lastName: String, firstName: String, onCreated: (Long) -> Unit) {
         viewModelScope.launch {
+            // FIX: Имя обязательно для ментора
+            if (firstName.isBlank()) {
+                _event.emit(UiEvent.ShowMessage("Введите имя ментора"))
+                return@launch
+            }
+
             val normalizedLastName = lastName.normalizeName()
-            val normalizedFirstName = if (firstName.isNotBlank()) firstName.normalizeName() else "Ментор"
+            val normalizedFirstName = firstName.normalizeName()
 
             val id = personRepo.createPerson(
                 lastName = normalizedLastName,
@@ -131,7 +1787,9 @@ class TeamRegisterVM @Inject constructor(
             if (id != -1L) {
                 _event.emit(UiEvent.ShowMessage("Ментор создан"))
                 onCreated(id)
-            } else _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
+            }
         }
     }
 
@@ -160,7 +1818,9 @@ class TeamRegisterVM @Inject constructor(
             if (id != -1L) {
                 _event.emit(UiEvent.ShowMessage("Персона создана"))
                 onCreated(id)
-            } else _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+            } else {
+                _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
+            }
         }
     }
 
@@ -264,2049 +1924,5 @@ data class MemberDraft(
             else -> false
         }
 }
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/teamcard/TeamCardScreen.kt>>>
-package com.speleo.start.presentation.screen.teamcard
-
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.speleo.start.data.local.entity.PersonEntity
-import com.speleo.start.presentation.component.PersonSearchDialog
-import kotlinx.coroutines.flow.collectLatest
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TeamCardScreen(
-    teamId: Long,
-    onBack: () -> Unit,
-    onNavigateToFinish: (() -> Unit)? = null,
-    onNavigateToRouteCard: ((Long) -> Unit)? = null,
-    vm: TeamCardVM = hiltViewModel()
-) {
-    val card by vm.teamCard.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    var showMenu by remember { mutableStateOf(false) }
-    var showDisbandDialog by remember { mutableStateOf(false) }
-    var showReplaceDialog by remember { mutableStateOf(false) }
-    var showReplacedHistory by remember { mutableStateOf(false) }
-    var selectedParticipantId by remember { mutableStateOf<Long?>(null) }
-    var selectedParticipantName by remember { mutableStateOf("") }
-    var disbandReason by remember { mutableStateOf("") }
-    var disbandPassword by remember { mutableStateOf("") }
-
-    LaunchedEffect(teamId) {
-        vm.loadTeam(teamId)
-    }
-
-    LaunchedEffect(Unit) {
-        vm.event.collectLatest { event ->
-            when (event) {
-                is TeamCardEvent.ShowMessage -> {
-                    snackbarHostState.showSnackbar(
-                        message = event.message,
-                        duration = SnackbarDuration.Short
-                    )
-                }
-                is TeamCardEvent.ShowPasswordDialog -> { }
-                is TeamCardEvent.ShowReplaceDialog -> {
-                    selectedParticipantId = event.participantId
-                    selectedParticipantName = event.currentPersonName
-                    showReplaceDialog = true
-                }
-                is TeamCardEvent.TeamUpdated -> {
-                    vm.loadTeam(event.teamId)
-                }
-            }
-        }
-    }
-
-    val fabAction = vm.getFabAction()
-    val canEdit = vm.canEdit()
-
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text("Карточка команды") },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text("← Назад") }
-                },
-                actions = {
-                    if (canEdit) {
-                        IconButton(onClick = { showMenu = true }) {
-                            Text("⋮", fontSize = 24.sp)
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("🚫 Расформировать команду") },
-                                onClick = {
-                                    showMenu = false
-                                    showDisbandDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🔄 Сменить класс") },
-                                onClick = {
-                                    showMenu = false
-                                    vm.changeClass("", null)
-                                },
-                                enabled = card?.status == "registered"
-                            )
-                        }
-                    }
-                }
-            )
-        },
-        floatingActionButton = {
-            if (fabAction != null) {
-                FloatingActionButton(
-                    onClick = {
-                        when (fabAction) {
-                            "finish" -> onNavigateToFinish?.invoke()
-                            "route" -> onNavigateToRouteCard?.invoke(teamId)
-                        }
-                    },
-                    containerColor = when (fabAction) {
-                        "finish" -> Color(0xFFD32F2F)
-                        "route" -> Color(0xFF2E7D32)
-                        else -> Color.Gray
-                    }
-                ) {
-                    Text(if (fabAction == "finish") "🏁" else "📄", fontSize = 20.sp)
-                }
-            }
-        }
-    ) { padding ->
-        if (card != null) {
-            val info = card!!
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Основная информация
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "№${info.number} · ${info.className}-й класс",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 20.sp
-                                )
-                                Text(
-                                    text = vm.getColorMarkText(),
-                                    fontSize = 14.sp,
-                                    color = Color(0xFFF57C00)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "Статус: ${statusToText(info.status)}", fontSize = 14.sp)
-
-                            if (info.checkpointsEntered) {
-                                Text(
-                                    text = "✅ Путевой лист подтверждён",
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF2E7D32)
-                                )
-                            } else if (info.status == "finished" && onNavigateToRouteCard != null) {
-                                TextButton(
-                                    onClick = { onNavigateToRouteCard(info.teamId) },
-                                    modifier = Modifier.padding(top = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "📄 Заполнить путевой лист",
-                                        fontSize = 13.sp,
-                                        color = Color(0xFF1E5A7A)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Состав команды
-                item {
-                    Text(
-                        text = "👥 Состав (${info.members.size})",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-
-                itemsIndexed(info.members) { index, member ->
-                    TeamMemberCard(
-                        member = member,
-                        isCaptain = index == 0,
-                        canEdit = canEdit,
-                        onReplace = {
-                            selectedParticipantId = member.participantId
-                            selectedParticipantName = "${member.lastName} ${member.firstName}"
-                            showReplaceDialog = true
-                        },
-                        onRemove = {
-                            vm.removeMember(member.participantId)
-                        },
-                        onAssignMentor = {
-                            // TODO: открыть диалог выбора ментора
-                        }
-                    )
-                }
-
-                // История замен - разворачиваемая
-                if (info.replacedCount > 0) {
-                    item {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showReplacedHistory = !showReplacedHistory },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "🔄 История замен (${info.replacedCount})",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                text = if (showReplacedHistory) "▲" else "▼",
-                                fontSize = 12.sp,
-                                color = Color.Gray
-                            )
-                        }
-
-                        if (showReplacedHistory) {
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            ) {
-                                Text(
-                                    text = "Список заменённых участников будет здесь",
-                                    modifier = Modifier.padding(12.dp),
-                                    fontSize = 12.sp,
-                                    color = Color.Gray
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "Загрузка...", fontSize = 18.sp)
-            }
-        }
-    }
-
-    // Диалог расформирования
-    if (showDisbandDialog) {
-        AlertDialog(
-            onDismissRequest = { showDisbandDialog = false },
-            title = { Text(text = "🚫 Расформировать команду") },
-            text = {
-                Column {
-                    Text(
-                        text = "Команда №${card?.number} будет расформирована. Участники станут свободными агентами.",
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = disbandReason,
-                        onValueChange = { disbandReason = it },
-                        label = { Text(text = "Причина (необязательно)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    if (card?.status == "started") {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = disbandPassword,
-                            onValueChange = { disbandPassword = it },
-                            label = { Text(text = "Пароль судьи") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vm.disbandTeam(disbandPassword, disbandReason)
-                        showDisbandDialog = false
-                        disbandReason = ""
-                        disbandPassword = ""
-                    },
-                    enabled = card?.status != "started" || disbandPassword.isNotBlank()
-                ) {
-                    Text(text = "РАСФОРМИРОВАТЬ")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDisbandDialog = false }) {
-                    Text(text = "Отмена")
-                }
-            }
-        )
-    }
-
-    // Диалог замены участника
-    if (showReplaceDialog && selectedParticipantId != null) {
-        PersonSearchDialog(
-            title = "Заменить: $selectedParticipantName",
-            onPersonSelected = { person ->
-                vm.replaceMember(selectedParticipantId!!, person.id)
-                showReplaceDialog = false
-                selectedParticipantId = null
-                selectedParticipantName = ""
-            },
-            onQuickCreate = { fullName ->
-                vm.createQuickPerson(fullName) { newPerson ->
-                    vm.replaceMember(selectedParticipantId!!, newPerson.id)
-                    showReplaceDialog = false
-                    selectedParticipantId = null
-                    selectedParticipantName = ""
-                }
-            },
-            onDismiss = {
-                showReplaceDialog = false
-                selectedParticipantId = null
-                selectedParticipantName = ""
-            }
-        )
-    }
-}
-
-@Composable
-fun TeamMemberCard(
-    member: TeamCardMember,
-    isCaptain: Boolean,
-    canEdit: Boolean,
-    onReplace: () -> Unit,
-    onRemove: () -> Unit,
-    onAssignMentor: () -> Unit
-) {
-    var showActions by remember { mutableStateOf(false) }
-
-    val ageColor = when {
-        member.age != null && member.age < 14 -> Color(0xFFD32F2F)
-        member.age != null && member.age in 14..17 -> Color(0xFFFF8C00)
-        else -> Color(0xFF00A86B)
-    }
-
-    val needsMentor = member.age != null && member.age < 18 && member.mentorName == null
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = canEdit) { showActions = !showActions }
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = member.lastName.take(1).uppercase(),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "${member.lastName} ${member.firstName}${member.nickname?.let { " «$it»" } ?: ""}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                        if (member.age != null) {
-                            Text(
-                                text = "Возраст: ${member.age} лет",
-                                fontSize = 13.sp,
-                                color = ageColor
-                            )
-                        }
-                        if (member.phone != null) {
-                            Text(
-                                text = "📞 ${member.phone}",
-                                fontSize = 12.sp,
-                                color = Color.Gray
-                            )
-                        }
-                    }
-                }
-                if (isCaptain) {
-                    Text(text = "👑", fontSize = 18.sp)
-                }
-            }
-
-            if (member.mentorName != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row {
-                    Text(
-                        text = "👨‍🏫 Ментор: ${member.mentorName}",
-                        fontSize = 13.sp,
-                        color = Color(0xFF1E5A7A)
-                    )
-                    if (!member.mentorConfirmed) {
-                        Text(
-                            text = " (не подтверждён)",
-                            fontSize = 12.sp,
-                            color = Color(0xFFD32F2F)
-                        )
-                    }
-                }
-            } else if (needsMentor && canEdit) {
-                Spacer(modifier = Modifier.height(4.dp))
-                TextButton(
-                    onClick = onAssignMentor,
-                    modifier = Modifier.padding(start = 0.dp)
-                ) {
-                    Text(
-                        text = "⚠️ Требуется ментор",
-                        fontSize = 12.sp,
-                        color = Color(0xFFD32F2F)
-                    )
-                }
-            }
-
-            if (member.judgeApproved) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "✅ Разрешено судьёй",
-                    fontSize = 12.sp,
-                    color = Color(0xFF2E7D32)
-                )
-            }
-
-            if (showActions && canEdit) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            onReplace()
-                            showActions = false
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(text = "🔄 Заменить", fontSize = 12.sp)
-                    }
-                    Button(
-                        onClick = {
-                            onRemove()
-                            showActions = false
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text(text = "❌ Исключить", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun statusToText(status: String): String {
-    return when (status) {
-        "registered" -> "Зарегистрирована"
-        "started" -> "На дистанции"
-        "finished" -> "Финишировала"
-        "lost" -> "Потеряна (ПСР)"
-        "disqualified" -> "Снята"
-        else -> status
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/teamcard/TeamCardVM.kt>>>
-package com.speleo.start.presentation.screen.teamcard
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.speleo.start.data.local.PreferencesManager
-import com.speleo.start.data.local.entity.PersonEntity
-import com.speleo.start.data.repository.MentorRepository
-import com.speleo.start.data.repository.ParticipantRepository
-import com.speleo.start.data.repository.PersonRepository
-import com.speleo.start.data.repository.TeamRepository
-import com.speleo.start.util.AgeCalculator
-import com.speleo.start.util.normalizeName
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-data class TeamCardMember(
-    val participantId: Long,
-    val personId: Long,
-    val firstName: String,
-    val lastName: String,
-    val nickname: String?,
-    val birthDate: String?,
-    val phone: String?,
-    val gender: String?,
-    val age: Int?,
-    val role: String,
-    val mentorName: String?,
-    val mentorConfirmed: Boolean,
-    val judgeApproved: Boolean
-)
-
-data class TeamCardInfo(
-    val teamId: Long,
-    val number: Int,
-    val className: String,
-    val status: String,
-    val colorMark: String,
-    val startTimestamp: Long?,
-    val finishTimestamp: Long?,
-    val members: List<TeamCardMember>,
-    val replacedCount: Int,
-    val checkpointsEntered: Boolean = false
-)
-
-sealed class TeamCardEvent {
-    data class ShowMessage(val message: String) : TeamCardEvent()
-    data class ShowPasswordDialog(val action: String, val reason: String? = null) : TeamCardEvent()
-    data class ShowReplaceDialog(val participantId: Long, val currentPersonName: String) : TeamCardEvent()
-    data class TeamUpdated(val teamId: Long) : TeamCardEvent()
-}
-
-@HiltViewModel
-class TeamCardVM @Inject constructor(
-    private val teamRepo: TeamRepository,
-    private val participantRepo: ParticipantRepository,
-    private val personRepo: PersonRepository,
-    private val mentorRepo: MentorRepository,
-    private val prefs: PreferencesManager
-) : ViewModel() {
-
-    private val _teamCard = MutableStateFlow<TeamCardInfo?>(null)
-    val teamCard: StateFlow<TeamCardInfo?> = _teamCard.asStateFlow()
-
-    private val _event = MutableSharedFlow<TeamCardEvent>()
-    val event: SharedFlow<TeamCardEvent> = _event.asSharedFlow()
-
-    fun loadTeam(teamId: Long) {
-        viewModelScope.launch {
-            val team = teamRepo.getTeamById(teamId) ?: return@launch
-            val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
-            val activeParticipants = participants.filter { it.statusMember == "active" }
-
-            val members = mutableListOf<TeamCardMember>()
-            for (p in activeParticipants) {
-                val person = personRepo.getPersonById(p.personId) ?: continue
-                val age = AgeCalculator.calculateAge(person.birthDate)
-
-                var mentorName: String? = null
-                var mentorConfirmed = p.mentorConfirmed
-
-                if (p.mentorId != null) {
-                    val mentor = mentorRepo.getMentorByParticipantId(p.id)
-                    if (mentor != null) {
-                        val mentorPerson = personRepo.getPersonById(mentor.personId)
-                        mentorName = mentorPerson?.let { "${it.lastName} ${it.firstName}" }
-                    }
-                }
-
-                members.add(
-                    TeamCardMember(
-                        participantId = p.id,
-                        personId = person.id,
-                        firstName = person.firstName,
-                        lastName = person.lastName,
-                        nickname = person.nickname,
-                        birthDate = person.birthDate,
-                        phone = person.phone,
-                        gender = person.gender,
-                        age = age,
-                        role = p.role,
-                        mentorName = mentorName,
-                        mentorConfirmed = mentorConfirmed,
-                        judgeApproved = p.judgeApproved
-                    )
-                )
-            }
-
-            _teamCard.value = TeamCardInfo(
-                teamId = team.id,
-                number = team.teamNumber,
-                className = team.className,
-                status = team.status,
-                colorMark = team.colorMark,
-                startTimestamp = team.startTimestamp,
-                finishTimestamp = team.finishTimestamp,
-                members = members,
-                replacedCount = participants.count { it.statusMember == "replaced" },
-                checkpointsEntered = team.checkpointsEntered
-            )
-        }
-    }
-
-    fun getColorMarkText(): String {
-        val card = _teamCard.value ?: return ""
-        val hasMinor = card.members.any { it.age != null && it.age in 14..17 && !it.mentorConfirmed }
-        val hasChild = card.members.any { it.age != null && it.age < 14 && !it.judgeApproved }
-        return when {
-            card.status == "disqualified" -> "СНЯТЫ"
-            hasChild -> "<14 !!!"
-            hasMinor -> "<17 !!!"
-            else -> {
-                if (card.members.any { it.age != null && it.age in 14..17 }) "14+"
-                else if (card.members.any { it.age != null && it.age < 14 }) "<14ок"
-                else "18+"
-            }
-        }
-    }
-
-    fun getFabAction(): String? {
-        val card = _teamCard.value ?: return null
-        return when (card.status) {
-            "started" -> "finish"
-            "finished" -> if (!card.checkpointsEntered) "route" else null
-            else -> null
-        }
-    }
-
-    fun canEdit(): Boolean {
-        val card = _teamCard.value ?: return false
-        return card.status == "registered" || card.status == "started"
-    }
-
-    fun replaceMember(participantId: Long, newPersonId: Long) {
-        viewModelScope.launch {
-            try {
-                val oldParticipant = participantRepo.getParticipantById(participantId)
-                if (oldParticipant == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник не найден"))
-                    return@launch
-                }
-
-                val team = teamRepo.getTeamById(oldParticipant.teamId)
-                if (team == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Команда не найдена"))
-                    return@launch
-                }
-
-                val existingInTeam = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                    .any { it.personId == newPersonId }
-                if (existingInTeam) {
-                    _event.emit(TeamCardEvent.ShowMessage("Эта персона уже в команде"))
-                    return@launch
-                }
-
-                val existingInComp = participantRepo.findActiveByPersonAndComp(newPersonId, team.competitionId)
-                if (existingInComp != null) {
-                    val otherTeam = teamRepo.getTeamById(existingInComp.teamId)
-                    _event.emit(TeamCardEvent.ShowMessage(
-                        "Персона уже в команде №${otherTeam?.teamNumber} (${otherTeam?.className}-й класс)"
-                    ))
-                    return@launch
-                }
-
-                participantRepo.updateParticipantStatus(oldParticipant.id, "replaced")
-
-                val newParticipantId = participantRepo.addParticipant(
-                    teamId = team.id,
-                    personId = newPersonId,
-                    role = oldParticipant.role,
-                    mentorId = oldParticipant.mentorId
-                )
-
-                if (newParticipantId != -1L) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник заменён"))
-                    loadTeam(team.id)
-                } else {
-                    _event.emit(TeamCardEvent.ShowMessage("Ошибка при добавлении участника"))
-                }
-            } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка: ${e.message}"))
-            }
-        }
-    }
-
-    fun createQuickPerson(fullName: String, onResult: (PersonEntity) -> Unit) {
-        viewModelScope.launch {
-            val parts = fullName.split(" ")
-            val rawLastName = parts[0]
-            val rawFirstName = if (parts.size > 1) parts.drop(1).joinToString(" ") else ""
-
-            val lastName = rawLastName.normalizeName()
-            val firstName = rawFirstName.normalizeName()
-
-            val personId = personRepo.createPerson(
-                lastName = lastName,
-                firstName = firstName,
-                middleName = null,
-                birthDate = null,
-                phone = null,
-                gender = null
-            )
-
-            if (personId != -1L) {
-                val person = personRepo.getPersonById(personId)
-                if (person != null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Персона создана"))
-                    onResult(person)
-                } else {
-                    _event.emit(TeamCardEvent.ShowMessage("Ошибка: персона не найдена после создания"))
-                }
-            } else {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка при создании персоны"))
-            }
-        }
-    }
-
-    fun removeMember(participantId: Long) {
-        viewModelScope.launch {
-            try {
-                val participant = participantRepo.getParticipantById(participantId)
-                if (participant == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник не найден"))
-                    return@launch
-                }
-
-                val team = teamRepo.getTeamById(participant.teamId)
-                if (team == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Команда не найдена"))
-                    return@launch
-                }
-
-                val activeMembers = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                if (activeMembers.size <= 1) {
-                    _event.emit(TeamCardEvent.ShowMessage("Нельзя удалить последнего участника. Используйте «Расформировать»"))
-                    return@launch
-                }
-
-                participantRepo.updateParticipantStatus(participant.id, "free_agent")
-                _event.emit(TeamCardEvent.ShowMessage("Участник исключён из команды"))
-                loadTeam(team.id)
-            } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка: ${e.message}"))
-            }
-        }
-    }
-
-    fun disbandTeam(password: String, reason: String) {
-        viewModelScope.launch {
-            val card = _teamCard.value
-            if (card == null) {
-                _event.emit(TeamCardEvent.ShowMessage("Команда не найдена"))
-                return@launch
-            }
-
-            when (card.status) {
-                "finished", "lost", "disqualified" -> {
-                    _event.emit(TeamCardEvent.ShowMessage("Нельзя расформировать ${card.status} команду"))
-                    return@launch
-                }
-                "started" -> {
-                    if (password != "1234" && password != "devdebug") {
-                        _event.emit(TeamCardEvent.ShowMessage("Неверный пароль"))
-                        return@launch
-                    }
-                }
-                "registered" -> { }
-            }
-
-            try {
-                val participants = participantRepo.getActiveParticipantsByTeam(card.teamId).first()
-                for (participant in participants) {
-                    participantRepo.updateParticipantStatus(participant.id, "free_agent")
-                }
-
-                teamRepo.updateTeamStatus(card.teamId, "disqualified")
-
-                val reasonText = if (reason.isNotBlank()) " Причина: $reason" else ""
-                _event.emit(TeamCardEvent.ShowMessage("Команда №${card.number} расформирована.$reasonText"))
-                loadTeam(card.teamId)
-            } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка: ${e.message}"))
-            }
-        }
-    }
-
-    fun changeClass(newClassName: String, password: String? = null) {
-        viewModelScope.launch {
-            _event.emit(TeamCardEvent.ShowMessage("Смена класса временно недоступна"))
-        }
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/teamlist/TeamListScreen.kt>>>
-package com.speleo.start.presentation.screen.teamlist
-
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TeamListScreen(
-    onBack: () -> Unit,
-    onTeamClick: (Long) -> Unit,
-    vm: TeamListVM = hiltViewModel()
-) {
-    val teams by vm.teams.collectAsStateWithLifecycle()
-    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
-
-    LaunchedEffect(Unit) { vm.loadTeams() }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Команды") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(12.dp)
-        ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { vm.onSearchQueryChange(it) },
-                label = { Text("🔍 Поиск по номеру или фамилии") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { vm.onSearchQueryChange("") }) {
-                            Text("✖️", fontSize = 16.sp)
-                        }
-                    }
-                }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (teams.isEmpty()) {
-                Text("Нет команд", fontSize = 16.sp)
-            } else {
-                LazyColumn {
-                    items(teams, key = { it.id }) { team ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(2.dp)
-                                .clickable {
-                                    vm.selectTeam(team.id)
-                                    onTeamClick(team.id)
-                                }
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row {
-                                        Text(
-                                            "№${team.number} (${team.className}-й кл)",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            " · ${team.statusText}",
-                                            fontSize = 13.sp,
-                                            color = when (team.status) {
-                                                "registered" -> Color(0xFF00A86B)
-                                                "started" -> Color(0xFFFF8C00)
-                                                "finished" -> Color(0xFF2E7D32)
-                                                else -> Color.Gray
-                                            }
-                                        )
-                                    }
-                                    Text(
-                                        team.colorMark,
-                                        fontSize = 13.sp,
-                                        color = when {
-                                            team.colorMark.contains("!!!") -> Color(0xFFD32F2F)
-                                            team.colorMark == "СНЯТЫ" -> Color(0xFFD32F2F)
-                                            else -> Color(0xFF00A86B)
-                                        }
-                                    )
-                                }
-                                if (team.memberNames.isNotBlank()) {
-                                    Text(
-                                        team.memberNames,
-                                        fontSize = 13.sp,
-                                        color = Color.Gray,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/teamlist/TeamListVM.kt>>>
-package com.speleo.start.presentation.screen.teamlist
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.speleo.start.data.local.PreferencesManager
-import com.speleo.start.data.repository.ParticipantRepository
-import com.speleo.start.data.repository.PersonRepository
-import com.speleo.start.data.repository.TeamRepository
-import com.speleo.start.presentation.SharedState
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-data class TeamListInfo(
-    val id: Long,
-    val number: Int,
-    val className: String,
-    val status: String,
-    val statusText: String,
-    val colorMark: String = "",
-    val memberNames: String = "",
-    val memberFullInfo: String = "",
-    val timeInfo: String = ""
-)
-
-@HiltViewModel
-class TeamListVM @Inject constructor(
-    private val teamRepo: TeamRepository,
-    private val participantRepo: ParticipantRepository,
-    private val personRepo: PersonRepository,
-    private val prefs: PreferencesManager,
-    private val sharedState: SharedState
-) : ViewModel() {
-
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _teamsRaw = MutableStateFlow<List<TeamListInfo>>(emptyList())
-    val teams: StateFlow<List<TeamListInfo>> = combine(_teamsRaw, _searchQuery) { raw, query ->
-        if (query.isBlank()) {
-            raw
-        } else {
-            val lowerQuery = query.lowercase()
-            raw.filter { team ->
-                team.number.toString().contains(query) ||
-                        team.memberFullInfo.contains(lowerQuery, ignoreCase = true)
-            }
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    fun loadTeams() {
-        viewModelScope.launch {
-            val cid = prefs.activeCompetitionId
-            if (cid == -1L) return@launch
-
-            teamRepo.getTeamsByCompetition(cid).collect { teams ->
-                val result = mutableListOf<TeamListInfo>()
-                for (team in teams) {
-                    val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                    val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
-
-                    // Полное имя + ник для поиска
-                    val memberFullInfo = persons.joinToString(" ") { person ->
-                        buildString {
-                            append("${person.lastName} ${person.firstName}")
-                            if (!person.nickname.isNullOrBlank()) {
-                                append(" ${person.nickname}")
-                            }
-                        }.lowercase()
-                    }
-
-                    // Для отображения: фамилия + первая буква имени + ник
-                    val memberNames = persons.joinToString(", ") { person ->
-                        val initial = if (person.firstName.isNotEmpty()) "${person.firstName.first()}." else ""
-                        val nicknamePart = if (!person.nickname.isNullOrBlank()) " «${person.nickname}»" else ""
-                        "${person.lastName} $initial$nicknamePart"
-                    }
-
-                    val hasMinor = persons.any { person ->
-                        person.birthDate?.let { birth ->
-                            try {
-                                val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                val bd = sdf.parse(birth)
-                                val today = java.util.Calendar.getInstance()
-                                val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                age in 14..17
-                            } catch (e: Exception) { false }
-                        } ?: false
-                    }
-
-                    val hasChild = persons.any { person ->
-                        person.birthDate?.let { birth ->
-                            try {
-                                val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                val bd = sdf.parse(birth)
-                                val today = java.util.Calendar.getInstance()
-                                val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                age < 14
-                            } catch (e: Exception) { false }
-                        } ?: false
-                    }
-
-                    val colorMark = when {
-                        team.status == "disqualified" -> "СНЯТЫ"
-                        team.status == "lost" -> "Lost"
-                        hasChild -> "<14 !!!"
-                        hasMinor -> "<17 !!!"
-                        else -> "18+"
-                    }
-
-                    val statusText = when (team.status) {
-                        "registered" -> "Зарег."
-                        "started" -> "В пути"
-                        "finished" -> "Финиш"
-                        "lost" -> "Lost"
-                        "disqualified" -> "Сняты"
-                        else -> team.status
-                    }
-
-                    result.add(
-                        TeamListInfo(
-                            id = team.id,
-                            number = team.teamNumber,
-                            className = team.className,
-                            status = team.status,
-                            statusText = statusText,
-                            colorMark = colorMark,
-                            memberNames = memberNames,
-                            memberFullInfo = memberFullInfo,
-                            timeInfo = when (team.status) {
-                                "started" -> "В пути"
-                                "finished" -> "Финиш"
-                                "registered" -> "Ожидает"
-                                "lost" -> "Потеряна"
-                                "disqualified" -> "Снята"
-                                else -> team.status
-                            }
-                        )
-                    )
-                }
-                _teamsRaw.value = result
-            }
-        }
-    }
-
-    fun onSearchQueryChange(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun selectTeam(teamId: Long) {
-        sharedState.selectTeam(teamId)
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/SharedState/SharedState.kt>>>
-package com.speleo.start.presentation
-
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class SharedState @Inject constructor() {
-
-    private val _selectedTeamId = MutableStateFlow(1L)
-    val selectedTeamId: StateFlow<Long> = _selectedTeamId.asStateFlow()
-
-    fun selectTeam(teamId: Long) {
-        _selectedTeamId.value = teamId
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/ui/theme/Color.kt>>>
-package com.speleo.start.ui.theme
-
-import androidx.compose.ui.graphics.Color
-
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
-
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
-<<<конец файла
-
-app/src/main/java/com/speleo/start/ui/theme/Theme.kt>>>
-package com.speleo.start.ui.theme
-
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
-
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
-)
-
-@Composable
-fun SpeleoStartTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/ui/theme/Type.kt>>>
-package com.speleo.start.ui.theme
-
-import androidx.compose.material3.Typography
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-
-// Set of Material typography styles to start with
-val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
-)
-<<<конец файла
-
-app/src/main/java/com/speleo/start/util/AgeCalculator.kt>>>
-package com.speleo.start.util
-
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
-
-object AgeCalculator {
-
-    private val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-
-    /**
-     * Вычисляет точный возраст в годах с учётом дня и месяца рождения.
-     * Возвращает null, если дата невалидна или не задана.
-     */
-    fun calculateAge(birthDateString: String?): Int? {
-        if (birthDateString.isNullOrBlank() || birthDateString.length != 10) return null
-
-        return try {
-            dateFormat.isLenient = false
-            val birthDate = dateFormat.parse(birthDateString) ?: return null
-
-            val today = Calendar.getInstance()
-            val birthCal = Calendar.getInstance().apply { time = birthDate }
-
-            var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
-            if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) {
-                age--
-            }
-            age
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Проверяет, может ли человек быть ментором (≥18 лет).
-     * Динамический расчёт — не зависит от захардкоженного флага.
-     */
-    fun canBeMentor(birthDateString: String?): Boolean {
-        val age = calculateAge(birthDateString) ?: return false
-        return age >= 18
-    }
-
-    /**
-     * Возвращает цветовую метку возраста для UI.
-     * @return Pair<метка_текст, цвет_hex>
-     */
-    fun getAgeColorMark(birthDateString: String?): AgeMark {
-        val age = calculateAge(birthDateString) ?: return AgeMark.UNKNOWN
-
-        return when {
-            age < 14 -> AgeMark.UNDER_14
-            age in 14..17 -> AgeMark.MINOR
-            age in 18..70 -> AgeMark.ADULT
-            age > 70 -> AgeMark.SENIOR
-            else -> AgeMark.UNKNOWN
-        }
-    }
-
-    enum class AgeMark(val label: String, val colorHex: String) {
-        UNDER_14("<14", "#FFC107"),
-        MINOR("14+", "#FFC107"),
-        ADULT("18+", "#00A86B"),
-        SENIOR("70+", "#FF8C00"),
-        UNKNOWN("?", "#9E9E9E")
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/util/DateValidator.kt>>>
-package com.speleo.start.util
-
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
-
-object DateValidator {
-
-    private val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-
-    fun isValid(date: String): Boolean {
-        if (date.length != 10) return false
-        return try {
-            dateFormat.isLenient = false
-            dateFormat.parse(date)
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    fun formatAsYouType(input: String): String {
-        val digits = input.filter { it.isDigit() }.take(8)
-        val sb = StringBuilder()
-        for (i in digits.indices) {
-            if (i == 2 || i == 4) sb.append(".")
-            sb.append(digits[i])
-        }
-        return sb.toString()
-    }
-
-    fun isRealDate(date: String): Boolean {
-        if (date.length != 10) return false
-
-        return try {
-            val parts = date.split(".")
-            if (parts.size != 3) return false
-
-            val day = parts[0].toIntOrNull() ?: return false
-            val month = parts[1].toIntOrNull() ?: return false
-            val year = parts[2].toIntOrNull() ?: return false
-
-            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-            if (year < 1900 || year > currentYear) return false
-
-            if (month !in 1..12) return false
-
-            val maxDay = when (month) {
-                1, 3, 5, 7, 8, 10, 12 -> 31
-                4, 6, 9, 11 -> 30
-                2 -> {
-                    val isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-                    if (isLeap) 29 else 28
-                }
-                else -> return false
-            }
-            day in 1..maxDay
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    fun calculateAge(birthDateString: String?): Int? {
-        if (birthDateString.isNullOrBlank()) return null
-        if (birthDateString.length != 10) return null
-
-        return try {
-            dateFormat.isLenient = false
-            val birthDate = dateFormat.parse(birthDateString) ?: return null
-
-            val today = Calendar.getInstance()
-            val birthCal = Calendar.getInstance().apply { time = birthDate }
-
-            var age = today.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
-            if (today.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) {
-                age--
-            }
-            if (age < 0) return null
-            age
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    fun canBeMentor(birthDateString: String?): Boolean {
-        val age = calculateAge(birthDateString) ?: return false
-        return age >= 18
-    }
-
-    fun getAgeColorMark(birthDateString: String?): AgeMark {
-        val age = calculateAge(birthDateString) ?: return AgeMark.UNKNOWN
-        return when {
-            age < 14 -> AgeMark.UNDER_14
-            age in 14..17 -> AgeMark.MINOR
-            age in 18..70 -> AgeMark.ADULT
-            else -> AgeMark.SENIOR
-        }
-    }
-
-    enum class AgeMark(val label: String, val colorHex: String) {
-        UNDER_14("<14", "#FFC107"),
-        MINOR("14+", "#FFC107"),
-        ADULT("18+", "#00A86B"),
-        SENIOR("70+", "#FF8C00"),
-        UNKNOWN("?", "#9E9E9E")
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/util/PhoneFormatter.kt>>>
-package com.speleo.start.util
-
-object PhoneFormatter {
-
-    fun formatAsYouType(input: String): String {
-        val raw = input.filter { it.isDigit() }
-        val digits = if (raw.startsWith("7") || raw.startsWith("8")) raw.drop(1) else raw
-        val limited = digits.take(10)
-
-        if (limited.isEmpty()) return ""
-
-        val sb = StringBuilder("+7")
-        if (limited.isNotEmpty()) sb.append(" (")
-
-        for (i in limited.indices) {
-            if (i == 3) sb.append(") ")
-            if (i == 6 || i == 8) sb.append("-")
-            sb.append(limited[i])
-        }
-        return sb.toString()
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/util/StringExt.kt>>>
-package com.speleo.start.util
-
-import java.util.Locale
-
-object StringExt {
-
-    private val RUSSIAN_LOCALE = Locale("ru", "RU")
-
-    /**
-     * Преобразует строку в Title Case (каждое слово с заглавной буквы).
-     * Поддерживает:
-     * - Русский язык (ё, й корректно)
-     * - Дефисные фамилии (Салтыков-Щедрин → Салтыков-Щедрин)
-     * - Инициалы (Иванов И.И. → Иванов И.И., не меняет)
-     */
-    fun String.toTitleCase(): String {
-        if (isEmpty()) return this
-
-        val result = StringBuilder()
-        var capitalizeNext = true
-
-        for (i in indices) {
-            val ch = this[i]
-
-            when {
-                ch.isLetter() -> {
-                    if (capitalizeNext) {
-                        result.append(ch.uppercase(RUSSIAN_LOCALE))
-                        capitalizeNext = false
-                    } else {
-                        result.append(ch.lowercase(RUSSIAN_LOCALE))
-                    }
-                }
-                ch == '-' -> {
-                    result.append(ch)
-                    capitalizeNext = true
-                }
-                ch == ' ' || ch == '.' -> {
-                    result.append(ch)
-                    capitalizeNext = true
-                }
-                else -> {
-                    result.append(ch)
-                }
-            }
-        }
-
-        return result.toString()
-    }
-
-    /**
-     * Обрезает пробелы по краям и применяет Title Case.
-     * Используется перед сохранением в БД.
-     */
-    fun normalizeName(input: String): String {
-        return input.trim().toTitleCase()
-    }
-}
-
-/**
- * Extension function для вызова normalizeName как метода строки
- */
-fun String.normalizeName(): String {
-    return StringExt.normalizeName(this)
-}
-<<<конец файла
-
-app/src/main/res/drawable/ic_launcher_background.xml>>>
-<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#3DDC84"
-        android:pathData="M0,0h108v108h-108z" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M9,0L9,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,0L19,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M29,0L29,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M39,0L39,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M49,0L49,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M59,0L59,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M69,0L69,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M79,0L79,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M89,0L89,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M99,0L99,108"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,9L108,9"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,19L108,19"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,29L108,29"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,39L108,39"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,49L108,49"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,59L108,59"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,69L108,69"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,79L108,79"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,89L108,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M0,99L108,99"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,29L89,29"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,39L89,39"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,49L89,49"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,59L89,59"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,69L89,69"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M19,79L89,79"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M29,19L29,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M39,19L39,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M49,19L49,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M59,19L59,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M69,19L69,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M79,19L79,89"
-        android:strokeWidth="0.8"
-        android:strokeColor="#33FFFFFF" />
-</vector>
-
-<<<конец файла
-
-app/src/main/res/drawable/ic_launcher_foreground.xml>>>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="85.84757"
-                android:endY="92.4963"
-                android:startX="42.9492"
-                android:startY="49.59793"
-                android:type="linear">
-                <item
-                    android:color="#44000000"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillType="nonZero"
-        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
-        android:strokeWidth="1"
-        android:strokeColor="#00000000" />
-</vector>
-<<<конец файла
-
-app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml>>>
-<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
-</adaptive-icon>
-<<<конец файла
-
-app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml>>>
-<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
-</adaptive-icon>
-<<<конец файла
-
-app/src/main/res/values/colors.xml>>>
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-</resources>
-<<<конец файла
-
-app/src/main/res/values/strings.xml>>>
-<resources>
-    <string name="app_name">SpeleoStart</string>
-</resources>
-<<<конец файла
-
-app/src/main/res/values/themes.xml>>>
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-
-    <style name="Theme.SpeleoStart" parent="android:Theme.Material.Light.NoActionBar" />
-</resources>
-<<<конец файла
-
-app/src/main/res/xml/backup_rules.xml>>>
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
--->
-<full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
-</full-backup-content>
-<<<конец файла
-
-app/src/main/res/xml/data_extraction_rules.xml>>>
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
-<data-extraction-rules>
-    <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
-    </cloud-backup>
-    <!--
-    <device-transfer>
-        <include .../>
-        <exclude .../>
-    </device-transfer>
-    -->
-</data-extraction-rules>
-<<<конец файла
-
-app/src/test/java/com/speleo/start/ExampleUnitTest.kt>>>
-package com.speleo.start
-
-import org.junit.Test
-
-import org.junit.Assert.*
-
-/**
- * Example local unit test, which will execute on the development machine (host).
- *
- * See [testing documentation](http://d.android.com/tools/testing).
- */
-class ExampleUnitTest {
-    @Test
-    fun addition_isCorrect() {
-        assertEquals(4, 2 + 2)
-    }
-}
-<<<конец файла
-
-docs/ARCHITECTURE.md>>>
-# 🏗️ ARCHITECTURE.md · SpeleoStart
-**Платформа:** Android (Kotlin, Compose) | **Архитектура:** MVVM + Clean
-
-## 1. СТРУКТУРА ПАКЕТОВ
-
-```
-com.speleo.start/
-├── data/
-│   ├── local/          # Room: Entity, DAO, Database, Converters
-│   └── repository/     # Абстракция над DAO (Flow/Suspend)
-├── domain/
-│   └── usecase/        # Бизнес-правила (валидация, расчёты, ОБГ)
-├── presentation/
-│   ├── SharedState.kt  # Глобальный StateFlow (activeCompId, selectedTeamId)
-│   ├── TimerManager.kt # Singleton, Flow-таймер, восстановление из БД
-│   └── screen/         # Compose UI + ViewModel (StateFlow/LaunchedEffect)
-└── util/               # DateValidator, PhoneFormatter, StringExt (TitleCase)
-```
-
-## 2. ПОТОКИ ДАННЫХ
-
-- Экран → ViewModel: UserEvent (клик, ввод, подтверждение)
-- ViewModel → UseCase/Repository: Валидация → suspend fun → Room
-- Repository → DB: Flow<List> → реактивное обновление UI
-- Global State: SharedState хранит выбранные ID. Хардкод 1L/2L запрещён.
-
-## 3. КЛЮЧЕВЫЕ РЕШЕНИЯ
-
-### 3.1 Таймер и восстановление
-
-- TimerManager считает: elapsed = now - startTimestamp
-- startTimestamp сохраняется в app_settings при старте/паузе/краше
-- При перезапуске: restoreFromSavedState() вычисляет разницу, таймер не сбрасывается
-
-### 3.2 Динамические правила (из настроек)
-
-- Параметры: min_team_size, confirm_judge, confirm_secretary, class_queue
-- Хранятся в competition.settings_json
-- Парсятся при загрузке соревнования, валидируются перед стартом
-
-### 3.3 ОБГ и сортировка результатов
-
-- Формируется в ResultsVM: isOBG = memberCount > settings.min_team_size
-- Сортировка: Status.ordinal → score DESC → netTime ASC → isOBG ASC
-
-### 3.4 Подтверждение ПЛ
-
-- RouteCardVM.save() читает флаги из settings_json
-- Если флаги сняты → пропускает ввод паролей, ставит checkpointsEntered = true, показывает предупреждение
-- Все изменения логируются в HistoryDao
-
-### 3.5 Форматирование ФИО
-
-- Поля всегда раздельные: Фамилия | Имя | Отчество
-- Автокап первой буквы (Title Case) применяется в `util/StringExt` перед сохранением
-- Работает в регистрации, инлайн-создании, быстром менторе
-
-**Реализация Title Case для русского языка:**
-
-```kotlin
-private val RUSSIAN_LOCALE = Locale("ru", "RU")
-
-fun String.toTitleCase(): String {
-    if (isEmpty()) return this
-    
-    val result = StringBuilder()
-    var capitalizeNext = true
-    
-    for (i in indices) {
-        val ch = this[i]
-        
-        when {
-            ch.isLetter() -> {
-                if (capitalizeNext) {
-                    result.append(ch.uppercase(RUSSIAN_LOCALE))
-                    capitalizeNext = false
-                } else {
-                    result.append(ch.lowercase(RUSSIAN_LOCALE))
-                }
-            }
-            ch == '-' -> {  // Дефисные фамилии (Салтыков-Щедрин)
-                result.append(ch)
-                capitalizeNext = true
-            }
-            ch == ' ' || ch == '.' -> {
-                result.append(ch)
-                capitalizeNext = true
-            }
-            else -> result.append(ch)
-        }
-    }
-    
-    return result.toString()
-}
-```
-**Ключевые особенности:**
-- Явный `Locale("ru", "RU")` вместо `Locale.getDefault()` — корректная обработка русского языка на любом устройстве
-- Поддержка дефисных фамилий (каждая часть с заглавной)
-- Инициалы (Иванов И.И.) не ломаются
-- `capitalizeNext` сбрасывается после пробелов, точек и дефисов
-
-### 3.6 Стабильность курсора в полях автоформатирования
-
-**Проблема:** При вводе текста с авто-вставкой символов (точки в дате `ДД.ММ.ГГГГ`, скобки в телефоне `+7 (XXX) XXX-XX-XX`) курсор «прыгает» — позиционируется перед вставленным символом вместо конца ввода.
-
-**Корневая причина:** `TextFieldValue.selection.start` указывает на позицию в **исходном** тексте (до форматирования). После вставки авто-символа длина `formatted` строки отличается от `newVal.text`, и прямое копирование `selection.start` даёт неверную позицию.
-
-**Запрещённый паттерн (приводит к багу):**
-
-```
-val newCursor = newVal.selection.start.coerceIn(0, formatted.length)
-```
-
-**Обязательный паттерн (пересчёт через цифры):**
-
-```
-val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
-val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
-val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
-```
-
-**Правило:** При автоформатировании, где количество вставляемых символов зависит от позиции (N цифр → N + K разделителей), курсор всегда пересчитывается через **количество значащих символов до старой позиции**, а не через абсолютный индекс.
-
-**Синхронизация состояния:**
-
-```
-var state by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
-
-LaunchedEffect(value) {
-if (state.text != value) {
-state = TextFieldValue(value, TextRange(value.length))
-}
-}
-```
-
-`LaunchedEffect` предотвращает рассинхрон при обновлении `value` извне (например, при очистке поля).
-
-### 3.7 ageGroup при быстром создании персоны
-
-- При `createQuickPerson()` обязательно вычислять `ageGroup` через `calculateAgeGroup(birthDate)` и сохранять в `MemberDraft`
-- `AgeGroup.UNKNOWN` после сохранения персоны недопустим — блокирует `allRequirementsMet` и скрывает UI ментора
-- В `MemberCard` использовать `effectiveAgeGroup`: резервный расчёт на лету если `ageGroup == UNKNOWN` (защита от legacy-данных)
-
-## 4. БАЗА ДАННЫХ (Room v5)
-
-- Триггеры: check_mentor_age, prevent_edit_confirmed_route_card, check_person_active_in_one_team
-- Миграции: version++ строго при изменении @Entity. fallbackToDestructiveMigration только в Debug
-- Очистка: строгий порядок дети → родители (участники → менторы → путевые → команды → персоны → соревнования)
-- Безопасность: Пароли SHA-256 + salt. EncryptedSharedPreferences для ключей сессии
-
-## 5. ПРАВИЛА РАЗРАБОТКИ
-
-1. Один файл → одна полная правка за итерацию
-2. Никогда не удалять импорты до финализации экрана
-3. Всегда проверять insert() != -1L
-4. Не хардкодить ID. Использовать SharedState или navArgument
-5. Тёмная тема: не использовать захардкоженные Color(). Только MaterialTheme или проверка обеих тем
-6. **Курсор автоформатирования:** Запрещено использовать `newVal.selection.start` как новую позицию курсора после вставки разделителей. Обязателен пересчёт через количество значащих символов.
-7. **ageGroup при quick-create:** Обязательно вычислять и сохранять в `MemberDraft` при `createQuickPerson()`. `UNKNOWN` после сохранения — баг.
 <<<конец файла
 

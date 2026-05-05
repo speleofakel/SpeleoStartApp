@@ -63,52 +63,69 @@ class TeamListVM @Inject constructor(
             teamRepo.getTeamsByCompetition(cid).collect { teams ->
                 val result = mutableListOf<TeamListInfo>()
                 for (team in teams) {
-                    val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                    val persons = participants.mapNotNull { personRepo.getPersonById(it.personId) }
+                    val participants = participantRepo.getParticipantsByTeam(team.id).first()
 
-                    // Полное имя + ник для поиска
-                    val memberFullInfo = persons.joinToString(" ") { person ->
-                        buildString {
-                            append("${person.lastName} ${person.firstName}")
-                            if (!person.nickname.isNullOrBlank()) {
-                                append(" ${person.nickname}")
-                            }
-                        }.lowercase()
+                    val persons = mutableListOf<com.speleo.start.data.local.entity.PersonEntity>()
+                    for (participant in participants) {
+                        val person = personRepo.getPersonById(participant.personId)
+                        if (person != null) {
+                            persons.add(person)
+                        }
                     }
 
-                    // Для отображения: фамилия + первая буква имени + ник
-                    val memberNames = persons.joinToString(", ") { person ->
+                    val memberFullInfoBuilder = StringBuilder()
+                    for (person in persons) {
+                        if (memberFullInfoBuilder.isNotEmpty()) {
+                            memberFullInfoBuilder.append(" ")
+                        }
+                        memberFullInfoBuilder.append(person.lastName)
+                        memberFullInfoBuilder.append(" ")
+                        memberFullInfoBuilder.append(person.firstName)
+                        if (!person.nickname.isNullOrBlank()) {
+                            memberFullInfoBuilder.append(" ")
+                            memberFullInfoBuilder.append(person.nickname)
+                        }
+                    }
+                    val memberFullInfo = memberFullInfoBuilder.toString().lowercase()
+
+                    val memberNamesBuilder = StringBuilder()
+                    for ((index, person) in persons.withIndex()) {
+                        if (index > 0) {
+                            memberNamesBuilder.append(", ")
+                        }
                         val initial = if (person.firstName.isNotEmpty()) "${person.firstName.first()}." else ""
                         val nicknamePart = if (!person.nickname.isNullOrBlank()) " «${person.nickname}»" else ""
-                        "${person.lastName} $initial$nicknamePart"
+                        memberNamesBuilder.append(person.lastName)
+                        memberNamesBuilder.append(" ")
+                        memberNamesBuilder.append(initial)
+                        memberNamesBuilder.append(nicknamePart)
                     }
+                    val memberNames = memberNamesBuilder.toString()
 
-                    val hasMinor = persons.any { person ->
-                        person.birthDate?.let { birth ->
+                    var hasMinor = false
+                    var hasChild = false
+                    for (person in persons) {
+                        val age = person.birthDate?.let { birth ->
                             try {
-                                val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                val bd = sdf.parse(birth)
-                                val today = java.util.Calendar.getInstance()
-                                val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
-                                var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                age in 14..17
-                            } catch (e: Exception) { false }
-                        } ?: false
-                    }
+                                val day = birth.substring(0, 2).toInt()
+                                val month = birth.substring(3, 5).toInt()
+                                val year = birth.substring(6, 10).toInt()
 
-                    val hasChild = persons.any { person ->
-                        person.birthDate?.let { birth ->
-                            try {
-                                val sdf = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
-                                val bd = sdf.parse(birth)
                                 val today = java.util.Calendar.getInstance()
-                                val birthCal = java.util.Calendar.getInstance().apply { time = bd!! }
+                                val birthCal = java.util.Calendar.getInstance().apply { set(year, month - 1, day) }
+
                                 var age = today.get(java.util.Calendar.YEAR) - birthCal.get(java.util.Calendar.YEAR)
-                                if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) age--
-                                age < 14
-                            } catch (e: Exception) { false }
-                        } ?: false
+                                if (today.get(java.util.Calendar.DAY_OF_YEAR) < birthCal.get(java.util.Calendar.DAY_OF_YEAR)) {
+                                    age--
+                                }
+                                age
+                            } catch (e: Exception) {
+                                0
+                            }
+                        } ?: 0
+
+                        if (age in 14..17) hasMinor = true
+                        if (age < 14) hasChild = true
                     }
 
                     val colorMark = when {
@@ -160,5 +177,20 @@ class TeamListVM @Inject constructor(
 
     fun selectTeam(teamId: Long) {
         sharedState.selectTeam(teamId)
+    }
+
+    /**
+     * Корректировка времени финиша для команды
+     */
+    fun adjustFinishTime(teamId: Long, timestamp: Long) {
+        viewModelScope.launch {
+            try {
+                teamRepo.setFinishTimestamp(teamId, timestamp)
+                teamRepo.updateTeamStatus(teamId, "finished")
+                loadTeams() // Перезагружаем список
+            } catch (e: Exception) {
+                // Обработка ошибки через snackbar в UI
+            }
+        }
     }
 }

@@ -28,7 +28,7 @@ data class MasterRouteCardEntity(
     val normativeSeconds: Int = 0,
     val forClass2: Boolean = true,
     val forClass3: Boolean = true,
-    val trackWaitTime: Boolean = false,
-    val trackExecutionTime: Boolean = false,
-    val bonusPoints: Int = 0
+    val trackWaitTime: Boolean = false,      // ✅ Поле для миграции
+    val trackExecutionTime: Boolean = false, // ✅ Поле для миграции
+    val bonusPoints: Int = 0                 // ✅ Поле для миграции
 )

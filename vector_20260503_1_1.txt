@@ -1,0 +1,1438 @@
+app/src/main/java/com/speleo/start/presentation/screen/start/StartScreen.kt>>>
+package com.speleo.start.presentation.screen.start
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.presentation.Screen
+import com.speleo.start.presentation.component.NoActiveCompetitionScreen
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StartScreen(
+    onBack: () -> Unit,
+    onNavigateToCompetitions: () -> Unit = {},
+    vm: StartVM = hiltViewModel()
+) {
+    val mainTimer by vm.timer.mainTimer.collectAsStateWithLifecycle()
+    val countdown by vm.timer.countdown.collectAsStateWithLifecycle()
+    val isPaused by vm.timer.isPaused.collectAsStateWithLifecycle()
+    val started by vm.timer.started.collectAsStateWithLifecycle()
+    val queue by vm.queue.collectAsStateWithLifecycle()
+    val hasActiveCompetition by vm.hasActiveCompetition.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadQueue() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Старт") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        if (!hasActiveCompetition) {
+            NoActiveCompetitionScreen(
+                onNavigateToCompetitions = onNavigateToCompetitions,
+                message = "Нет активного соревнования"
+            )
+        } else {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                TimerDisplay(mainTimer)
+                Text(formatCountdown(countdown), fontSize = 32.sp, color = MaterialTheme.colorScheme.primary)
+
+                Button(onClick = { vm.timer.togglePause() }) {
+                    Text(if (isPaused) "ПУСК" else "ПАУЗА")
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (!started) {
+                    Button(onClick = { vm.timer.startCompetition() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("НАЧАТЬ СОРЕВНОВАНИЯ")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { }, modifier = Modifier.weight(1f)) { Text("СНЯТЬ") }
+                    Button(onClick = { vm.skipCurrentTeam() }, modifier = Modifier.weight(1f)) { Text("ПРОПУСК") }
+                    Button(onClick = { vm.startCurrentTeam() }, modifier = Modifier.weight(1f)) { Text("СТАРТ") }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Очередь (${queue.size} команд):", fontSize = 16.sp)
+
+                LazyColumn {
+                    items(queue, key = { it.id }) { team ->
+                        Card(modifier = Modifier.fillMaxWidth().padding(2.dp)) {
+                            Text("№${team.number} (${team.className}-й кл)", modifier = Modifier.padding(8.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TimerDisplay(millis: Long, modifier: Modifier = Modifier) {
+    val totalSec = millis / 1000
+    val hours = totalSec / 3600
+    val minutes = (totalSec % 3600) / 60
+    val seconds = totalSec % 60
+    val hundredths = (millis % 1000) / 10
+
+    val baseSize = 50.sp
+    val smallSize = 30.sp
+    val green = Color(0xFF388E3C)
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.Bottom
+    ) {
+        if (hours > 0) {
+            Text("%02d:".format(hours), fontSize = baseSize, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = green)
+        } else {
+            Text("00:", fontSize = smallSize, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = green.copy(alpha = 0.5f))
+        }
+        Text("%02d:%02d".format(minutes, seconds), fontSize = baseSize, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = green)
+        Text(".%02d".format(hundredths), fontSize = smallSize, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = green)
+    }
+}
+
+private fun formatCountdown(s: Int): String = "%02d:%02d".format(s / 60, s % 60)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/start/StartVM.kt>>>
+package com.speleo.start.presentation.screen.start
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.presentation.TimerManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class StartTeamInfo(
+    val id: Long,
+    val number: Int,
+    val className: String
+)
+
+@HiltViewModel
+class StartVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val prefs: PreferencesManager,
+    val timer: TimerManager
+) : ViewModel() {
+
+    private val _queue = MutableStateFlow<List<StartTeamInfo>>(emptyList())
+    val queue: StateFlow<List<StartTeamInfo>> = _queue.asStateFlow()
+
+    private val _hasActiveCompetition = MutableStateFlow(false)
+    val hasActiveCompetition: StateFlow<Boolean> = _hasActiveCompetition.asStateFlow()
+
+    init {
+        timer.restoreFromSavedState()
+        checkActiveCompetition()
+    }
+
+    private fun checkActiveCompetition() {
+        val cid = prefs.activeCompetitionId
+        _hasActiveCompetition.value = cid != -1L
+    }
+
+    fun loadQueue() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) {
+                _queue.value = emptyList()
+                return@launch
+            }
+
+            teamRepo.getRegisteredTeamsByClass(cid, "2")
+                .combine(teamRepo.getRegisteredTeamsByClass(cid, "3")) { c2, c3 ->
+                    // Чередование 2 → 3 → 2 → 3
+                    val maxSize = maxOf(c2.size, c3.size)
+                    val result = mutableListOf<StartTeamInfo>()
+                    for (i in 0 until maxSize) {
+                        if (i < c2.size) result.add(StartTeamInfo(c2[i].id, c2[i].teamNumber, "2"))
+                        if (i < c3.size) result.add(StartTeamInfo(c3[i].id, c3[i].teamNumber, "3"))
+                    }
+                    result
+                }
+                .collect { _queue.value = it }
+        }
+    }
+
+    fun skipCurrentTeam() {
+        viewModelScope.launch {
+            if (_queue.value.isNotEmpty()) {
+                val first = _queue.value.first()
+                // TODO: перенести команду в конец очереди своего класса
+                timer.resetCountdown()
+                loadQueue()
+            }
+        }
+    }
+
+    fun startCurrentTeam() {
+        viewModelScope.launch {
+            if (_queue.value.isNotEmpty()) {
+                val first = _queue.value.first()
+                // TODO: старт команды, изменение статуса на started
+                teamRepo.updateTeamStatus(first.id, "started")
+                teamRepo.setStartTimestamp(first.id, System.currentTimeMillis())
+                loadQueue()
+                timer.resetCountdown()
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/TimerManager.kt>>>
+package com.speleo.start.presentation
+
+import com.speleo.start.data.local.dao.AppSettingsDao
+import com.speleo.start.data.local.entity.AppSettingsEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class TimerManager @Inject constructor(
+    private val settingsDao: AppSettingsDao
+) {
+    companion object {
+        const val KEY_START_TIMESTAMP = "competition_start_timestamp"
+        const val KEY_COMPETITION_ACTIVE = "competition_active"
+    }
+
+    private val _mainTimer = MutableStateFlow(0L)
+    val mainTimer: StateFlow<Long> = _mainTimer.asStateFlow()
+
+    private val _countdown = MutableStateFlow(120)
+    val countdown: StateFlow<Int> = _countdown.asStateFlow()
+
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    private val _started = MutableStateFlow(false)
+    val started: StateFlow<Boolean> = _started.asStateFlow()
+
+    private var mainJob: Job? = null
+    private var countdownJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    fun restoreFromSavedState() {
+        CoroutineScope(Dispatchers.IO).launch {
+            val startTs = settingsDao.get(KEY_START_TIMESTAMP)?.toLongOrNull() ?: 0L
+            val active = settingsDao.get(KEY_COMPETITION_ACTIVE)?.toBooleanStrictOrNull() ?: false
+
+            if (active && startTs > 0) {
+                _mainTimer.value = System.currentTimeMillis() - startTs
+                _started.value = true
+                startMainLoop()
+            }
+        }
+    }
+
+    fun startCompetition() {
+        CoroutineScope(Dispatchers.IO).launch {
+            val timestamp = System.currentTimeMillis()
+            settingsDao.put(AppSettingsEntity(KEY_START_TIMESTAMP, timestamp.toString()))
+            settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "true"))
+        }
+        _started.value = true
+        _mainTimer.value = 0L
+        _countdown.value = 120
+        startMainLoop()
+        startCountdownLoop()
+    }
+
+    private fun startMainLoop() {
+        mainJob?.cancel()
+        val startRef = System.currentTimeMillis() - _mainTimer.value
+        mainJob = scope.launch {
+            while (isActive) {
+                _mainTimer.value = System.currentTimeMillis() - startRef
+                delay(100)
+            }
+        }
+    }
+
+    private fun startCountdownLoop() {
+        countdownJob?.cancel()
+        countdownJob = scope.launch {
+            while (isActive && _countdown.value > 0) {
+                if (!_isPaused.value) {
+                    delay(1000)
+                    _countdown.value -= 1
+                } else {
+                    delay(100)
+                }
+            }
+            // Автоматически перезапускаем, когда доходит до 0
+            if (_countdown.value == 0 && _started.value) {
+                _countdown.value = 120
+                startCountdownLoop()
+            }
+        }
+    }
+
+    fun togglePause() {
+        _isPaused.value = !_isPaused.value
+    }
+
+    fun resetCountdown(seconds: Int = 120) {
+        _countdown.value = seconds
+        if (_started.value) {
+            startCountdownLoop()
+        }
+    }
+
+    fun stop() {
+        mainJob?.cancel()
+        countdownJob?.cancel()
+        _started.value = false
+        _mainTimer.value = 0L
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/SharedState/SharedState.kt>>>
+package com.speleo.start.presentation
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class SharedState @Inject constructor() {
+
+    private val _selectedTeamId = MutableStateFlow(1L)
+    val selectedTeamId: StateFlow<Long> = _selectedTeamId.asStateFlow()
+
+    fun selectTeam(teamId: Long) {
+        _selectedTeamId.value = teamId
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/repository/TeamRepository.kt>>>
+package com.speleo.start.data.repository
+
+import com.speleo.start.data.local.dao.TeamDao
+import com.speleo.start.data.local.entity.TeamEntity
+import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class TeamRepository @Inject constructor(
+    private val teamDao: TeamDao
+) {
+    suspend fun getMaxTeamNumber(competitionId: Long, className: String): Int? =
+        teamDao.getMaxTeamNumber(competitionId, className)
+
+    fun getTeamsByCompetition(competitionId: Long): Flow<List<TeamEntity>> =
+        teamDao.getTeamsByCompetition(competitionId)
+
+    fun getRegisteredTeamsByClass(competitionId: Long, className: String): Flow<List<TeamEntity>> =
+        teamDao.getRegisteredTeamsByClass(competitionId, className)
+
+    fun getStartedTeams(competitionId: Long): Flow<List<TeamEntity>> =
+        teamDao.getStartedTeams(competitionId)
+
+    fun getFinishedTeams(competitionId: Long): Flow<List<TeamEntity>> =
+        teamDao.getFinishedTeams(competitionId)
+
+    suspend fun getTeamById(id: Long): TeamEntity? =
+        teamDao.getTeamById(id)
+
+    suspend fun getTeamCountByClass(competitionId: Long, className: String): Int =
+        teamDao.getTeamCountByClass(competitionId, className)
+
+    suspend fun createTeam(
+        competitionId: Long,
+        teamNumber: Int,
+        className: String,
+        colorMark: String = "green"
+    ): Long {
+        val team = TeamEntity(
+            competitionId = competitionId,
+            teamNumber = teamNumber,
+            className = className,
+            status = "registered",
+            colorMark = colorMark
+        )
+        return teamDao.insert(team)
+    }
+
+    suspend fun updateTeam(team: TeamEntity) =
+        teamDao.update(team)
+
+    suspend fun updateTeamStatus(id: Long, status: String) =
+        teamDao.updateStatus(id, status)
+
+    suspend fun setStartTimestamp(id: Long, timestamp: Long) =
+        teamDao.setStartTimestamp(id, timestamp)
+
+    suspend fun setFinishTimestamp(id: Long, timestamp: Long) =
+        teamDao.setFinishTimestamp(id, timestamp)
+
+    suspend fun incrementSkipCount(id: Long) =
+        teamDao.incrementSkipCount(id)
+
+    suspend fun deleteTeam(id: Long) =
+        teamDao.delete(id)
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/dao/TeamDao.kt>>>
+package com.speleo.start.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
+import com.speleo.start.data.local.entity.TeamEntity
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface TeamDao {
+
+    @Query("SELECT * FROM teams WHERE competitionId = :competitionId ORDER BY className, teamNumber")
+    fun getTeamsByCompetition(competitionId: Long): Flow<List<TeamEntity>>
+
+    @Query("SELECT * FROM teams WHERE competitionId = :competitionId AND status = 'registered' AND className = :className ORDER BY teamNumber")
+    fun getRegisteredTeamsByClass(competitionId: Long, className: String): Flow<List<TeamEntity>>
+
+    @Query("SELECT * FROM teams WHERE competitionId = :competitionId AND status = 'started'")
+    fun getStartedTeams(competitionId: Long): Flow<List<TeamEntity>>
+
+    @Query("SELECT * FROM teams WHERE competitionId = :competitionId AND status = 'finished'")
+    fun getFinishedTeams(competitionId: Long): Flow<List<TeamEntity>>
+
+    @Query("SELECT * FROM teams WHERE id = :id")
+    suspend fun getTeamById(id: Long): TeamEntity?
+
+    @Insert
+    suspend fun insert(team: TeamEntity): Long
+
+    @Update
+    suspend fun update(team: TeamEntity)
+
+    @Query("UPDATE teams SET status = :status WHERE id = :id")
+    suspend fun updateStatus(id: Long, status: String)
+
+    @Query("UPDATE teams SET startTimestamp = :timestamp WHERE id = :id")
+    suspend fun setStartTimestamp(id: Long, timestamp: Long)
+
+    @Query("UPDATE teams SET finishTimestamp = :timestamp, status = 'finished' WHERE id = :id")
+    suspend fun setFinishTimestamp(id: Long, timestamp: Long)
+
+    @Query("UPDATE teams SET skipCount = skipCount + 1 WHERE id = :id")
+    suspend fun incrementSkipCount(id: Long)
+    @Query("SELECT COUNT(*) FROM teams WHERE competitionId = :competitionId AND className = :className")
+    suspend fun getTeamCountByClass(competitionId: Long, className: String): Int
+    @Query("DELETE FROM teams WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM teams")
+    suspend fun deleteAll()
+
+    @Query("SELECT MAX(teamNumber) FROM teams WHERE competitionId = :competitionId AND className = :className")
+    suspend fun getMaxTeamNumber(competitionId: Long, className: String): Int?
+
+
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/entity/TeamEntity.kt>>>
+package com.speleo.start.data.local.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "teams")
+data class TeamEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val competitionId: Long,
+    val teamNumber: Int,
+    val className: String,
+    val status: String = "registered",
+    val colorMark: String = "green",
+    val startTimestamp: Long? = null,
+    val finishTimestamp: Long? = null,
+    val skipCount: Int = 0,
+    val psrResolved: Boolean = false,
+    val checkpointsEntered: Boolean = false,
+    val finalPlace: Int? = null,
+    val placeMerged: Boolean = false,
+    val mergedWith: String? = null
+)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/repository/CompetitionRepository.kt>>>
+package com.speleo.start.data.repository
+
+import com.speleo.start.data.local.dao.CompetitionDao
+import com.speleo.start.data.local.entity.CompetitionEntity
+import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class CompetitionRepository @Inject constructor(
+    private val competitionDao: CompetitionDao
+) {
+
+    fun getActiveCompetitions(): Flow<List<CompetitionEntity>> =
+        competitionDao.getActiveCompetitions()
+
+    fun getArchivedCompetitions(): Flow<List<CompetitionEntity>> =
+        competitionDao.getArchivedCompetitions()
+
+    suspend fun getCompetitionById(id: Long): CompetitionEntity? =
+        competitionDao.getCompetitionById(id)
+
+    suspend fun createCompetition(
+        name: String, shortName: String, date: String, place: String,
+        discipline: String = "underground", system: String? = null
+    ): Long {
+        val competition = CompetitionEntity(
+            name = name, shortName = shortName, date = date, place = place,
+            discipline = discipline, system = system
+        )
+        return competitionDao.insert(competition)
+    }
+
+    suspend fun updateCompetition(competition: CompetitionEntity) =
+        competitionDao.update(competition)
+
+    suspend fun archiveCompetition(id: Long) =
+        competitionDao.archive(id)
+
+    suspend fun deleteCompetition(id: Long) =
+        competitionDao.delete(id)
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/dao/CompetitionDao.kt>>>
+package com.speleo.start.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
+import com.speleo.start.data.local.entity.CompetitionEntity
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface CompetitionDao {
+
+    @Query("SELECT * FROM competitions WHERE isArchived = 0 ORDER BY createdAt DESC")
+    fun getActiveCompetitions(): Flow<List<CompetitionEntity>>
+
+    @Query("SELECT * FROM competitions WHERE isArchived = 1 ORDER BY createdAt DESC")
+    fun getArchivedCompetitions(): Flow<List<CompetitionEntity>>
+
+    @Query("SELECT * FROM competitions WHERE id = :id")
+    suspend fun getCompetitionById(id: Long): CompetitionEntity?
+
+    @Insert
+    suspend fun insert(competition: CompetitionEntity): Long
+
+    @Update
+    suspend fun update(competition: CompetitionEntity)
+
+    @Query("UPDATE competitions SET isArchived = 1 WHERE id = :id")
+    suspend fun archive(id: Long)
+
+    @Query("DELETE FROM competitions WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM competitions")
+    suspend fun deleteAll()
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/PreferencesManager.kt>>>
+package com.speleo.start.data.local
+
+import android.content.Context
+import android.content.SharedPreferences
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class PreferencesManager @Inject constructor(
+    @ApplicationContext context: Context
+) {
+    private val prefs: SharedPreferences = context.getSharedPreferences("speleo_prefs", Context.MODE_PRIVATE)
+
+    var activeCompetitionId: Long
+        get() = prefs.getLong("active_competition_id", -1)
+        set(value) = prefs.edit().putLong("active_competition_id", value).apply()
+
+    val hasActiveCompetition: Boolean
+        get() = activeCompetitionId != -1L
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/dao/AppSettingsDao.kt>>>
+package com.speleo.start.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import com.speleo.start.data.local.entity.AppSettingsEntity
+
+@Dao
+interface AppSettingsDao {
+
+    @Query("SELECT value FROM app_settings WHERE `key` = :key")
+    suspend fun get(key: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entry: AppSettingsEntity)
+
+    @Query("DELETE FROM app_settings WHERE `key` = :key")
+    suspend fun remove(key: String)
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/data/local/entity/AppSettingsEntity.kt>>>
+package com.speleo.start.data.local.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "app_settings")
+data class AppSettingsEntity(
+    @PrimaryKey
+    val key: String,
+    val value: String
+)
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/component/NoActiveCompetitionScreen.kt>>>
+package com.speleo.start.presentation.component
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+@Composable
+fun NoActiveCompetitionScreen(
+    onNavigateToCompetitions: () -> Unit,
+    message: String = "Нет активного соревнования"
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(24.dp)
+        ) {
+            Text(
+                text = "⚠️ $message",
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Выберите или создайте соревнование на экране «Соревнования»",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onNavigateToCompetitions
+            ) {
+                Text("ВЫБРАТЬ СОРЕВНОВАНИЕ")
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/MainActivity.kt>>>
+package com.speleo.start
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.speleo.start.presentation.Screen
+import com.speleo.start.presentation.SharedState
+import com.speleo.start.presentation.screen.competitions.CompetitionListScreen
+import com.speleo.start.presentation.screen.competitions.CompetitionNewScreen
+import com.speleo.start.presentation.screen.competitions.CompetitionSettingsScreen
+import com.speleo.start.presentation.screen.finish.FinishScreen
+import com.speleo.start.presentation.screen.home.HomeScreen
+import com.speleo.start.presentation.screen.persons.PersonDetailScreen
+import com.speleo.start.presentation.screen.persons.PersonListScreen
+import com.speleo.start.presentation.screen.results.ResultsScreen
+import com.speleo.start.presentation.screen.routecard.RouteCardScreen
+import com.speleo.start.presentation.screen.start.StartScreen
+import com.speleo.start.presentation.screen.team.TeamRegisterScreen
+import com.speleo.start.presentation.screen.teamcard.TeamCardScreen
+import com.speleo.start.presentation.screen.teamlist.TeamListScreen
+import com.speleo.start.ui.theme.SpeleoStartTheme
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+    @Inject lateinit var sharedState: SharedState
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            SpeleoStartTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val navController = rememberNavController()
+                    val teamId by sharedState.selectedTeamId.collectAsStateWithLifecycle()
+
+                    NavHost(navController = navController, startDestination = Screen.Home.route) {
+                        composable(Screen.Home.route) {
+                            HomeScreen(onNavigate = { screen -> navController.navigate(screen.route) })
+                        }
+                        composable(Screen.PersonDetail.route) { backStackEntry ->
+                            val personId = backStackEntry.arguments?.getString("personId")?.toLongOrNull() ?: -1L
+                            PersonDetailScreen(
+                                personId = personId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Competitions.route) {
+                            CompetitionListScreen(
+                                onBack = { navController.popBackStack() },
+                                onCreateNew = { navController.navigate(Screen.CreateCompetition.route) },
+                                onSettings = { cid -> navController.navigate(Screen.CompetitionSettings.pass(cid)) }
+                            )
+                        }
+                        composable(Screen.CreateCompetition.route) {
+                            CompetitionNewScreen(
+                                onBack = { navController.popBackStack() },
+                                onSaved = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(
+                            route = Screen.CompetitionSettings.route,
+                            arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val competitionId = backStackEntry.arguments?.getLong("competitionId") ?: return@composable
+                            CompetitionSettingsScreen(
+                                competitionId = competitionId,
+                                onBack = { navController.popBackStack() },
+                                onCheckpoints = { cid -> navController.navigate(Screen.Checkpoints.pass(cid)) }
+                            )
+                        }
+                        composable(
+                            route = Screen.Checkpoints.route,
+                            arguments = listOf(navArgument("competitionId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val competitionId = backStackEntry.arguments?.getLong("competitionId") ?: return@composable
+                            com.speleo.start.presentation.screen.checkpoints.CheckpointListScreen(
+                                competitionId = competitionId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Persons.route) {
+                            PersonListScreen(
+                                onBack = { navController.popBackStack() },
+                                onAddNew = { navController.navigate(Screen.PersonNew.route) },
+                                onPersonClick = { personId ->
+                                    navController.navigate(Screen.PersonDetail.createRoute(personId))
+                                }
+                            )
+                        }
+                        composable(Screen.PersonNew.route) {
+                            com.speleo.start.presentation.screen.persons.PersonNewScreen(
+                                onBack = { navController.popBackStack() },
+                                onSaved = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Register.route) {
+                            TeamRegisterScreen(
+                                onBack = { navController.popBackStack() },
+                                onNavigateToTeam = { teamId ->
+                                    navController.navigate(Screen.TeamCard.pass(teamId)) {
+                                        popUpTo(Screen.Register.route) { inclusive = true }
+                                    }
+                                }
+                            )
+                        }
+                        composable(Screen.Start.route) {
+                            StartScreen(
+                                onBack = { navController.popBackStack() },
+                                onNavigateToCompetitions = { navController.navigate(Screen.Competitions.route) }
+                            )
+                        }
+                        composable(Screen.Finish.route) {
+                            FinishScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(Screen.TeamList.route) {
+                            TeamListScreen(
+                                onBack = { navController.popBackStack() },
+                                onTeamClick = { tid -> navController.navigate(Screen.TeamCard.pass(tid)) }
+                            )
+                        }
+                        composable(Screen.Results.route) {
+                            ResultsScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(
+                            route = Screen.RouteCardDetail.route,
+                            arguments = listOf(navArgument("teamId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
+                            RouteCardScreen(
+                                teamId = teamId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Screen.Settings.route) {
+                            com.speleo.start.presentation.screen.settings.SettingsScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(
+                            route = Screen.TeamCard.route,
+                            arguments = listOf(navArgument("teamId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
+                            TeamCardScreen(
+                                teamId = teamId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/home/HomeScreen.kt>>>
+package com.speleo.start.presentation.screen.home
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.speleo.start.presentation.Screen
+
+// Data class для пункта меню
+data class MenuTile(
+    val icon: String,
+    val title: String,
+    val subtitle: String? = null,
+    val route: Screen? = null,
+    val alwaysEnabled: Boolean = false
+)
+
+// Список пунктов меню
+val MenuTiles = listOf(
+    MenuTile("📋", "Соревнования", "Управление", Screen.Competitions, alwaysEnabled = true),
+    MenuTile("📄", "Путевые", "Ожидают: 0", Screen.RouteCardDetail, alwaysEnabled = false),
+    MenuTile("⏱️", "Старт", "Очередь: 0", Screen.Start, alwaysEnabled = false),
+    MenuTile("🏁", "Финиш", "На дист.: 0", Screen.Finish, alwaysEnabled = false),
+    MenuTile("📝", "Регистрация", "Создание команд", Screen.Register, alwaysEnabled = false),
+    MenuTile("📋", "Команды", "Список", Screen.TeamList, alwaysEnabled = false),
+    MenuTile("👤", "Персоны", "База", Screen.Persons, alwaysEnabled = true),
+    MenuTile("🏆", "Итоги", "Результаты", Screen.Results, alwaysEnabled = false),
+    MenuTile("⚙️", "Настройки", null, Screen.Settings, alwaysEnabled = true),
+)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun HomeScreen(
+    onNavigate: (Screen) -> Unit,
+    homeVM: HomeVM = hiltViewModel()
+) {
+    val configuration = LocalConfiguration.current
+    val columns = if (configuration.screenWidthDp >= 600) 3 else 2
+    var showDevMenu by remember { mutableStateOf(false) }
+
+    val competitionName by homeVM.competitionName.collectAsStateWithLifecycle()
+    val hasActiveCompetition by homeVM.hasActiveCompetition.collectAsStateWithLifecycle()
+    val isArchived by homeVM.isArchived.collectAsStateWithLifecycle()
+    val mainTimer by homeVM.mainTimer.collectAsStateWithLifecycle()
+    val stats by homeVM.stats.collectAsStateWithLifecycle()
+
+    LaunchedEffect(hasActiveCompetition, isArchived) {
+        if (hasActiveCompetition && !isArchived) {
+            homeVM.restoreTimer()
+        } else if (isArchived) {
+            homeVM.stopTimer()
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        if (competitionName.isNotBlank()) competitionName else "🏆 СпелеоСтарт",
+                        fontSize = 18.sp
+                    )
+                }
+            )
+        }
+    ) { paddingValues ->
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(
+                start = 8.dp, end = 8.dp,
+                top = paddingValues.calculateTopPadding() + 4.dp,
+                bottom = 8.dp
+            ),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                when {
+                    !hasActiveCompetition -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("⚠️", fontSize = 32.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Нет активного соревнования",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Выберите или создайте соревнование",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(
+                                    onClick = { onNavigate(Screen.Competitions) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("ВЫБРАТЬ СОРЕВНОВАНИЕ")
+                                }
+                            }
+                        }
+                    }
+                    isArchived -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("📦", fontSize = 24.sp)
+                                    Text(competitionName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("АРХИВ", fontSize = 11.sp, color = Color.Gray)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Режим просмотра. Новые старты и финиши недоступны.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { onNavigate(Screen.Competitions) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("ВЫБРАТЬ ДРУГОЕ СОРЕВНОВАНИЕ")
+                                }
+                            }
+                        }
+                    }
+                    else -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(competitionName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🟢 Активно", color = Color(0xFF00A86B), fontSize = 13.sp)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                MainTimerDisplay(mainTimer)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("${stats.onCourse}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                        Text("🏃 На трассе", fontSize = 10.sp)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("${stats.finished}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                        Text("🏁 Финиш", fontSize = 10.sp)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("${stats.disqualified}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                        Text("⚠️ DQ", fontSize = 10.sp)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { onNavigate(Screen.Start) },
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(vertical = 6.dp)
+                                    ) {
+                                        Text("⏱️ Старт", fontSize = 12.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onNavigate(Screen.Finish) },
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(vertical = 6.dp)
+                                    ) {
+                                        Text("🏁 Финиш", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            items(MenuTiles) { tile ->
+                MenuTileCard(
+                    tile = tile,
+                    onNavigate = onNavigate,
+                    onLongClick = if (tile.route == Screen.Settings) {{ showDevMenu = true }} else null,
+                    hasActiveCompetition = hasActiveCompetition,
+                    isArchived = isArchived
+                )
+            }
+
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedButton(onClick = { homeVM.exportData() }, modifier = Modifier.weight(1f)) {
+                        Text("📤 Экспорт", fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { homeVM.importData() }, modifier = Modifier.weight(1f)) {
+                        Text("📥 Импорт", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDevMenu) {
+        AlertDialog(
+            onDismissRequest = { showDevMenu = false },
+            title = { Text("🛠 Меню разработчика") },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        homeVM.generateTestData()
+                        showDevMenu = false
+                    }) { Text("🧪 Заполнить тестовыми") }
+                    TextButton(onClick = {
+                        homeVM.clearTestData()
+                        showDevMenu = false
+                    }) { Text("🗑️ Очистить тестовые") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDevMenu = false }) { Text("Закрыть") }
+            }
+        )
+    }
+}
+
+@Composable
+fun MainTimerDisplay(millis: Long, modifier: Modifier = Modifier) {
+    val totalSec = millis / 1000
+    val hours = totalSec / 3600
+    val minutes = (totalSec % 3600) / 60
+    val seconds = totalSec % 60
+    val hundredths = (millis % 1000) / 10
+
+    val baseSize = 36.sp
+    val smallSize = 24.sp
+    val timerColor = Color(0xFF00C853)
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.Bottom
+    ) {
+        if (hours > 0) {
+            Text(
+                text = "%02d:".format(hours),
+                fontSize = baseSize,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = timerColor
+            )
+        } else {
+            Text(
+                text = "00:",
+                fontSize = smallSize,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = timerColor.copy(alpha = 0.5f)
+            )
+        }
+        Text(
+            text = "%02d:%02d".format(minutes, seconds),
+            fontSize = baseSize,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = timerColor
+        )
+        Text(
+            text = ".%02d".format(hundredths),
+            fontSize = smallSize,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = timerColor
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun MenuTileCard(
+    tile: MenuTile,
+    onNavigate: (Screen) -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    hasActiveCompetition: Boolean = false,
+    isArchived: Boolean = false
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+
+    val enabled = when {
+        tile.alwaysEnabled -> true
+        isArchived && tile.route == Screen.Results -> true
+        isArchived -> false
+        !hasActiveCompetition -> false
+        else -> true
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(90.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (enabled) {
+                MaterialTheme.colorScheme.surface
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 10.dp, horizontal = 6.dp)
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {
+                        if (enabled) {
+                            tile.route?.let { onNavigate(it) }
+                        }
+                    },
+                    onLongClick = { onLongClick?.invoke() }
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = tile.icon,
+                fontSize = 28.sp,
+                color = if (enabled) Color.Unspecified else Color.Gray
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = tile.title,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                color = if (enabled) Color.Unspecified else Color.Gray
+            )
+            if (tile.subtitle != null) {
+                Text(
+                    text = tile.subtitle,
+                    fontSize = 10.sp,
+                    color = if (enabled) MaterialTheme.colorScheme.primary else Color.Gray
+                )
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/home/HomeVM.kt>>>
+package com.speleo.start.presentation.screen.home
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.TestDataGenerator
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.presentation.TimerManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class CompetitionStats(
+    val onCourse: Int = 0,
+    val finished: Int = 0,
+    val disqualified: Int = 0
+)
+
+@HiltViewModel
+class HomeVM @Inject constructor(
+    private val generator: TestDataGenerator,
+    private val prefs: PreferencesManager,
+    private val competitionRepo: CompetitionRepository,
+    private val teamRepo: TeamRepository,
+    val timerManager: TimerManager  // 👈 Изменено: public val вместо private val
+) : ViewModel() {
+
+    private val _competitionName = MutableStateFlow("")
+    val competitionName: StateFlow<String> = _competitionName.asStateFlow()
+
+    private val _hasActiveCompetition = MutableStateFlow(false)
+    val hasActiveCompetition: StateFlow<Boolean> = _hasActiveCompetition.asStateFlow()
+
+    private val _isArchived = MutableStateFlow(false)
+    val isArchived: StateFlow<Boolean> = _isArchived.asStateFlow()
+
+    private val _stats = MutableStateFlow(CompetitionStats())
+    val stats: StateFlow<CompetitionStats> = _stats.asStateFlow()
+
+    // Публичный доступ к таймеру для UI
+    val mainTimer = timerManager.mainTimer
+
+    init {
+        viewModelScope.launch {
+            loadActiveCompetition()
+        }
+    }
+
+    suspend fun loadActiveCompetition() {
+        val cid = prefs.activeCompetitionId
+
+        if (cid == -1L) {
+            _hasActiveCompetition.value = false
+            _isArchived.value = false
+            _competitionName.value = ""
+            _stats.value = CompetitionStats()
+            return
+        }
+
+        val comp = competitionRepo.getCompetitionById(cid)
+
+        if (comp == null) {
+            prefs.activeCompetitionId = -1L
+            _hasActiveCompetition.value = false
+            _isArchived.value = false
+            _competitionName.value = ""
+            _stats.value = CompetitionStats()
+            return
+        }
+
+        _hasActiveCompetition.value = true
+        _isArchived.value = comp.isArchived
+        _competitionName.value = comp.shortName.ifBlank { comp.name }
+
+        try {
+            val teams = teamRepo.getTeamsByCompetition(cid).first()
+            _stats.value = CompetitionStats(
+                onCourse = teams.count { it.status == "started" },
+                finished = teams.count { it.status == "finished" },
+                disqualified = teams.count { it.status == "disqualified" || it.status == "lost" }
+            )
+        } catch (e: Exception) {
+            _stats.value = CompetitionStats()
+        }
+    }
+
+    fun restoreTimer() {
+        timerManager.restoreFromSavedState()
+    }
+
+    fun stopTimer() {
+        timerManager.stop()
+    }
+
+    fun generateTestData() {
+        viewModelScope.launch {
+            generator.generate()
+            loadActiveCompetition()
+        }
+    }
+
+    fun clearTestData() {
+        viewModelScope.launch {
+            generator.clearAll()
+            _hasActiveCompetition.value = false
+            _isArchived.value = false
+            _competitionName.value = ""
+            _stats.value = CompetitionStats()
+        }
+    }
+
+    fun exportData() {
+        viewModelScope.launch {
+            // TODO: реализовать экспорт
+            // Пока просто заглушка
+            // _event.emit(HomeEvent.ShowMessage("Экспорт временно недоступен"))
+        }
+    }
+
+    fun importData() {
+        viewModelScope.launch {
+            // TODO: реализовать импорт
+            // Пока просто заглушка
+            // _event.emit(HomeEvent.ShowMessage("Импорт временно недоступен"))
+        }
+    }
+}
+<<<конец файла
+
