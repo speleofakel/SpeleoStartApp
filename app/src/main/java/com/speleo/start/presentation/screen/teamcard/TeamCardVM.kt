@@ -3,13 +3,17 @@ package com.speleo.start.presentation.screen.teamcard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.local.dao.AppSettingsDao
 import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.local.entity.TeamRouteCardEntity
+import com.speleo.start.data.repository.CompetitionRepository
 import com.speleo.start.data.repository.MasterRouteCardRepository
 import com.speleo.start.data.repository.MentorRepository
 import com.speleo.start.data.repository.ParticipantRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
 import com.speleo.start.data.repository.TeamRouteCardRepository
+import com.speleo.start.presentation.TimerManager
 import com.speleo.start.util.AgeCalculator
 import com.speleo.start.util.normalizeName
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,10 +25,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 
 data class TeamCardMember(
@@ -57,28 +59,19 @@ data class TeamCardInfo(
     val checkpointsEntered: Boolean = false
 )
 
-data class RouteCardEntryItem(
+data class CheckpointGridItem(
     val checkpointId: Long,
     val displayNumber: Int,
-    val weight: Int,
-    val type: String,
     val taken: Boolean,
-    val takenWithError: Boolean,
-    val offsetTime: String?,
-    val penalty: Int
+    val takenWithError: Boolean
 )
 
-data class RouteCardStats(
-    val totalCount: Int = 0,
-    val takenCount: Int = 0,
-    val totalScore: Int = 0,
-    val totalPenalty: Int = 0,
-    val totalOffsetSeconds: Long = 0,
-    val totalOffsetTime: String = "00:00",
-    val startTime: String = "--:--:--",
-    val finishTime: String = "--:--:--",
-    val netTime: String = "--:--:--",
-    val isFullyConfirmed: Boolean = false
+data class RouteCardSaveEntry(
+    val checkpointId: Long,
+    val taken: Boolean,
+    val takenWithError: Boolean,
+    val offsetTime: Long?,
+    val penalty: Int
 )
 
 sealed class TeamCardEvent {
@@ -96,24 +89,50 @@ class TeamCardVM @Inject constructor(
     private val mentorRepo: MentorRepository,
     private val masterRouteCardRepo: MasterRouteCardRepository,
     private val teamRouteCardRepo: TeamRouteCardRepository,
-    private val prefs: PreferencesManager
+    private val competitionRepo: CompetitionRepository,
+    private val prefs: PreferencesManager,
+    private val appSettingsDao: AppSettingsDao,
+    private val timerManager: TimerManager
 ) : ViewModel() {
 
     private val _teamCard = MutableStateFlow<TeamCardInfo?>(null)
     val teamCard: StateFlow<TeamCardInfo?> = _teamCard.asStateFlow()
 
-    private val _routeEntries = MutableStateFlow<List<RouteCardEntryItem>>(emptyList())
-    val routeEntries: StateFlow<List<RouteCardEntryItem>> = _routeEntries.asStateFlow()
+    private val _checkpoints = MutableStateFlow<List<CheckpointGridItem>>(emptyList())
+    val checkpoints: StateFlow<List<CheckpointGridItem>> = _checkpoints.asStateFlow()
 
-    private val _routeStats = MutableStateFlow(RouteCardStats())
-    val routeStats: StateFlow<RouteCardStats> = _routeStats.asStateFlow()
+    private val _startTimeRelative = MutableStateFlow("—:—:—")
+    val startTimeRelative: StateFlow<String> = _startTimeRelative.asStateFlow()
+
+    private val _finishTimeRelative = MutableStateFlow("—:—:—")
+    val finishTimeRelative: StateFlow<String> = _finishTimeRelative.asStateFlow()
+
+    private val _takenCount = MutableStateFlow(0)
+    val takenCount: StateFlow<Int> = _takenCount.asStateFlow()
+
+    private val _totalCheckpoints = MutableStateFlow(0)
+    val totalCheckpointsCount: StateFlow<Int> = _totalCheckpoints.asStateFlow()
+
+    private val _isMasterMode = MutableStateFlow(false)
+    val isMasterMode: StateFlow<Boolean> = _isMasterMode.asStateFlow()
 
     private val _event = MutableSharedFlow<TeamCardEvent>()
     val event: SharedFlow<TeamCardEvent> = _event.asSharedFlow()
 
+    private var competitionStartTimestamp: Long = 0L
+
+    private suspend fun loadCompetitionStartTimestamp() {
+        competitionStartTimestamp = appSettingsDao.get(TimerManager.KEY_START_TIMESTAMP)?.toLongOrNull() ?: 0L
+    }
+
     fun loadTeam(teamId: Long) {
         viewModelScope.launch {
+            loadCompetitionStartTimestamp()
+
             val team = teamRepo.getTeamById(teamId) ?: return@launch
+
+            updateRelativeTimes(team.startTimestamp, team.finishTimestamp)
+
             val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
 
             val activeParticipants = participants.filter { participant -> participant.status == "active" }
@@ -178,129 +197,108 @@ class TeamCardVM @Inject constructor(
         }
     }
 
-    fun loadRouteCard(teamId: Long) {
+    fun loadCheckpoints(teamId: Long) {
         viewModelScope.launch {
             val team = teamRepo.getTeamById(teamId) ?: return@launch
 
-            // Запускаем отдельную корутину для сбора Flow
-            launch {
-                masterRouteCardRepo.getRouteCardByCompetition(team.competitionId)
-                    .combine(teamRouteCardRepo.getRouteCardByTeam(teamId)) { master, teamRoute ->
-                        val items = master.map { cp ->
-                            val te = teamRoute.find { it.checkpointId == cp.id }
-                            RouteCardEntryItem(
-                                checkpointId = cp.id,
-                                displayNumber = cp.displayNumber,
-                                weight = cp.weight,
-                                type = cp.type,
-                                taken = te?.taken ?: false,
-                                takenWithError = te?.takenWithError ?: false,
-                                offsetTime = te?.offsetTime?.let { formatSecondsToMmSs(it.toInt()) },
-                                penalty = te?.penalty ?: 0
-                            )
-                        }
+            masterRouteCardRepo.getRouteCardByCompetition(team.competitionId)
+                .combine(teamRouteCardRepo.getRouteCardByTeam(teamId)) { master, teamRoute ->
+                    _totalCheckpoints.value = master.size
+                    _takenCount.value = teamRoute.count { it.taken }
 
-                        val stats = calculateStats(team, items)
-                        _routeStats.value = stats
-                        _routeEntries.value = items
+                    master.map { cp ->
+                        val te = teamRoute.find { it.checkpointId == cp.id }
+                        CheckpointGridItem(
+                            checkpointId = cp.id,
+                            displayNumber = cp.displayNumber,
+                            taken = te?.taken ?: false,
+                            takenWithError = te?.takenWithError ?: false
+                        )
                     }
-                    .collect()
-            }
+                }
+                .collect { _checkpoints.value = it }
         }
     }
 
-    private fun calculateStats(team: com.speleo.start.data.local.entity.TeamEntity, entries: List<RouteCardEntryItem>): RouteCardStats {
-        val takenCorrectEntries = entries.filter { it.taken && !it.takenWithError }
-        val totalScore = takenCorrectEntries.sumOf { it.weight }
-        val totalPenalty = entries.filter { it.taken }.sumOf { it.penalty }
-        val takenCount = entries.count { it.taken }
-
-        // totalOffsetSeconds - сумма отсечек только для взятых КП
-        val totalOffsetSeconds = entries
-            .filter { it.taken && it.offsetTime != null }
-            .sumOf { parseMmSsToSeconds(it.offsetTime ?: "00:00") ?: 0 }
-
-        val startTime = team.startTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
-        val finishTime = team.finishTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
-
-        val raceSeconds = if (team.startTimestamp != null && team.finishTimestamp != null) {
-            (team.finishTimestamp!! - team.startTimestamp!!) / 1000
-        } else 0
-
-        val netSeconds = (raceSeconds - totalOffsetSeconds).coerceAtLeast(0)
-
-        return RouteCardStats(
-            totalCount = entries.size,
-            takenCount = takenCount,
-            totalScore = totalScore - totalPenalty,
-            totalPenalty = totalPenalty,
-            totalOffsetSeconds = totalOffsetSeconds.toLong(),
-            totalOffsetTime = formatSecondsToMmSs(totalOffsetSeconds),
-            startTime = startTime,
-            finishTime = finishTime,
-            netTime = formatSecondsToMmSs(netSeconds.toInt()),
-            isFullyConfirmed = team.checkpointsEntered
-        )
-    }
-
-    private fun calculateStats(team: com.speleo.start.data.local.entity.TeamEntity?, entries: List<RouteCardEntryItem>): RouteCardStats {
-        val takenEntries = entries.filter { it.taken && !it.takenWithError }
-        val totalScore = takenEntries.sumOf { it.weight }
-        val totalPenalty = entries.filter { it.taken }.sumOf { it.penalty }
-        val takenCount = entries.count { it.taken }
-        val totalOffsetSeconds = entries.filter { it.taken && it.offsetTime != null }.sumOf {
-            parseMmSsToSeconds(it.offsetTime ?: "00:00") ?: 0
+    private fun updateRelativeTimes(startTimestamp: Long?, finishTimestamp: Long?) {
+        if (competitionStartTimestamp == 0L) {
+            _startTimeRelative.value = "—:—:—"
+            _finishTimeRelative.value = "—:—:—"
+            return
         }
 
-        val startTime = team?.startTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
-        val finishTime = team?.finishTimestamp?.let { formatTimestamp(it) } ?: "--:--:--"
-        val raceSeconds = if (team?.startTimestamp != null && team.finishTimestamp != null) {
-            (team.finishTimestamp!! - team.startTimestamp!!) / 1000
-        } else 0
-        val netSeconds = (raceSeconds - totalOffsetSeconds).coerceAtLeast(0)
+        _startTimeRelative.value = startTimestamp?.let {
+            val relativeSeconds = (it - competitionStartTimestamp) / 1000
+            if (relativeSeconds < 0) "--:--:--" else formatRelativeTime(relativeSeconds.toInt())
+        } ?: "—:—:—"
 
-        return RouteCardStats(
-            totalCount = entries.size,
-            takenCount = takenCount,
-            totalScore = totalScore - totalPenalty,
-            totalPenalty = totalPenalty,
-            totalOffsetSeconds = totalOffsetSeconds,
-            totalOffsetTime = formatSecondsToMmSs(totalOffsetSeconds.toInt()),
-            startTime = startTime,
-            finishTime = finishTime,
-            netTime = formatSecondsToMmSs(netSeconds.toInt()),
-            isFullyConfirmed = team?.checkpointsEntered ?: false
-        )
+        _finishTimeRelative.value = finishTimestamp?.let {
+            val relativeSeconds = (it - competitionStartTimestamp) / 1000
+            if (relativeSeconds < 0) "--:--:--" else formatRelativeTime(relativeSeconds.toInt())
+        } ?: "—:—:—"
     }
 
-    private fun formatTimestamp(timestamp: Long): String {
-        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        return sdf.format(Date(timestamp))
+    private fun formatRelativeTime(seconds: Int): String {
+        val hours = seconds / 3600
+        val minutes = (seconds % 3600) / 60
+        val secs = seconds % 60
+        return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, secs)
+        else "%02d:%02d".format(minutes, secs)
     }
 
-    private fun formatSecondsToMmSs(totalSeconds: Int): String {
-        val hours = totalSeconds / 3600
-        val minutes = (totalSeconds % 3600) / 60
-        val seconds = totalSeconds % 60
-        return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, seconds)
-        else "%02d:%02d".format(minutes, seconds)
+    fun adjustFinishTimeRelative(relativeSeconds: Int) {
+        viewModelScope.launch {
+            val team = _teamCard.value ?: return@launch
+            if (competitionStartTimestamp == 0L) return@launch
+
+            val absoluteTimestamp = competitionStartTimestamp + (relativeSeconds * 1000L)
+            teamRepo.setFinishTimestamp(team.teamId, absoluteTimestamp)
+
+            _finishTimeRelative.value = formatRelativeTime(relativeSeconds)
+            _event.emit(TeamCardEvent.ShowMessage("Время финиша обновлено"))
+            loadTeam(team.teamId)
+        }
     }
 
-    private fun parseMmSsToSeconds(input: String): Int? {
-        val parts = input.split(":")
-        return when (parts.size) {
-            2 -> {
-                val minutes = parts[0].toIntOrNull() ?: return null
-                val seconds = parts[1].toIntOrNull() ?: return null
-                minutes * 60 + seconds
+    fun masterUnlockRouteCard(teamId: Long, password: String): Boolean {
+        if (password == "devdebug") {
+            viewModelScope.launch {
+                val team = teamRepo.getTeamById(teamId)
+                if (team != null) {
+                    teamRepo.updateTeam(team.copy(checkpointsEntered = false))
+                    _event.emit(TeamCardEvent.ShowMessage("🔓 Путевой лист разблокирован для мастер-правки"))
+                }
             }
-            3 -> {
-                val hours = parts[0].toIntOrNull() ?: return null
-                val minutes = parts[1].toIntOrNull() ?: return null
-                val seconds = parts[2].toIntOrNull() ?: return null
-                hours * 3600 + minutes * 60 + seconds
+            return true
+        }
+        return false
+    }
+
+    fun masterSaveRouteCard(teamId: Long, entries: List<RouteCardSaveEntry>) {
+        viewModelScope.launch {
+            val team = teamRepo.getTeamById(teamId) ?: return@launch
+
+            for (entry in entries) {
+                // ✅ ИСПРАВЛЕНО: getEntry возвращает TeamRouteCardEntity?, не Flow
+                val existing = teamRouteCardRepo.getEntry(teamId, entry.checkpointId)
+                val teamRouteCard = TeamRouteCardEntity(
+                    teamId = teamId,
+                    checkpointId = entry.checkpointId,
+                    taken = entry.taken,
+                    takenWithError = entry.takenWithError,
+                    offsetTime = entry.offsetTime,
+                    penalty = entry.penalty,
+                    judgeConfirmed = existing?.judgeConfirmed ?: true,
+                    secretaryConfirmed = existing?.secretaryConfirmed ?: true
+                )
+                teamRouteCardRepo.saveEntry(teamRouteCard)
             }
-            else -> null
+
+            teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+            _isMasterMode.value = false
+            _event.emit(TeamCardEvent.ShowMessage("✅ Путевой лист сохранён. Подтверждения не требуются."))
+            loadTeam(teamId)
+            loadCheckpoints(teamId)
         }
     }
 
@@ -308,8 +306,9 @@ class TeamCardVM @Inject constructor(
         viewModelScope.launch {
             val team = teamRepo.getTeamById(teamId) ?: return@launch
             teamRepo.updateTeam(team.copy(checkpointsEntered = false))
+            _isMasterMode.value = false
             loadTeam(teamId)
-            loadRouteCard(teamId)
+            loadCheckpoints(teamId)
         }
     }
 

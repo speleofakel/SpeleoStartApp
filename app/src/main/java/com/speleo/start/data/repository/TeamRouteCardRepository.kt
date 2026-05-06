@@ -3,6 +3,7 @@ package com.speleo.start.data.repository
 import com.speleo.start.data.local.dao.TeamRouteCardDao
 import com.speleo.start.data.local.entity.TeamRouteCardEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,4 +47,7 @@ class TeamRouteCardRepository @Inject constructor(
 
     suspend fun deleteAllForTeam(teamId: Long) =
         teamRouteCardDao.deleteAllForTeam(teamId)
+
+    suspend fun getRouteCardByTeamFirst(teamId: Long): List<TeamRouteCardEntity> =
+        teamRouteCardDao.getRouteCardByTeam(teamId).first()
 }

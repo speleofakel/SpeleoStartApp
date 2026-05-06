@@ -1,6 +1,8 @@
 package com.speleo.start.presentation.screen.finish
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,9 +37,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun FinishScreen(
     onBack: () -> Unit,
@@ -47,6 +50,7 @@ fun FinishScreen(
     val selectedIds by vm.selectedIds.collectAsStateWithLifecycle()
     var showTimeAdjustDialog by remember { mutableStateOf<Long?>(null) }
     var adjustingTeamNumber by remember { mutableStateOf(0) }
+    var adjustingTeamId by remember { mutableStateOf<Long?>(null) }
     var adjustedHours by remember { mutableStateOf("") }
     var adjustedMinutes by remember { mutableStateOf("") }
     var adjustedSeconds by remember { mutableStateOf("") }
@@ -54,7 +58,7 @@ fun FinishScreen(
 
     LaunchedEffect(Unit) {
         vm.loadStartedTeams()
-        vm.captureFinishTime() // Фиксируем время при входе на экран
+        vm.captureFinishTime()
     }
 
     Scaffold(
@@ -77,15 +81,44 @@ fun FinishScreen(
                 LazyColumn {
                     items(teams, key = { it.id }) { team ->
                         val isSelected = selectedIds.contains(team.id)
+                        val interactionSource = remember { MutableInteractionSource() }
+
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 2.dp)
-                                .clickable { vm.toggleSelection(team.id) }
+                                .combinedClickable(
+                                    interactionSource = interactionSource,
+                                    indication = null,
+                                    onClick = { vm.toggleSelection(team.id) },
+                                    onLongClick = {
+                                        // ✅ ДОБАВЛЕНА КОРРЕКТИРОВКА ВРЕМЕНИ
+                                        if (team.hasFinished) {
+                                            adjustingTeamId = team.id
+                                            adjustingTeamNumber = team.number
+                                            adjustedHours = ""
+                                            adjustedMinutes = ""
+                                            adjustedSeconds = ""
+                                            showTimeAdjustDialog = team.id
+                                        }
+                                    }
+                                )
                         ) {
                             Row(modifier = Modifier.padding(12.dp)) {
                                 Checkbox(checked = isSelected, onCheckedChange = null)
-                                Text("№${team.number} (${team.className}-й кл)", fontSize = 16.sp)
+                                Column {
+                                    Text(
+                                        "№${team.number} (${team.className}-й кл)",
+                                        fontSize = 16.sp
+                                    )
+                                    if (team.hasFinished) {
+                                        Text(
+                                            "📌 Долгий тап для корректировки времени",
+                                            fontSize = 10.sp,
+                                            color = androidx.compose.ui.graphics.Color.Gray
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -104,10 +137,13 @@ fun FinishScreen(
         }
     }
 
-    // Диалог корректировки времени для команды
-    showTimeAdjustDialog?.let { teamId ->
+    // Диалог корректировки времени
+    if (showTimeAdjustDialog != null && adjustingTeamId != null) {
         AlertDialog(
-            onDismissRequest = { showTimeAdjustDialog = null },
+            onDismissRequest = {
+                showTimeAdjustDialog = null
+                adjustingTeamId = null
+            },
             title = { Text("Корректировка времени финиша") },
             text = {
                 Column {
@@ -156,13 +192,14 @@ fun FinishScreen(
                         val seconds = adjustedSeconds.toIntOrNull() ?: 0
                         val totalSeconds = hours * 3600 + minutes * 60 + seconds
 
-                        if (totalSeconds > 0) {
+                        if (totalSeconds > 0 && adjustingTeamId != null) {
                             val timestamp = totalSeconds * 1000L
                             scope.launch {
-                                vm.adjustFinishTime(teamId, timestamp)
+                                vm.adjustFinishTime(adjustingTeamId!!, timestamp)
                             }
                         }
                         showTimeAdjustDialog = null
+                        adjustingTeamId = null
                         adjustedHours = ""
                         adjustedMinutes = ""
                         adjustedSeconds = ""
@@ -175,6 +212,7 @@ fun FinishScreen(
             dismissButton = {
                 TextButton(onClick = {
                     showTimeAdjustDialog = null
+                    adjustingTeamId = null
                     adjustedHours = ""
                     adjustedMinutes = ""
                     adjustedSeconds = ""

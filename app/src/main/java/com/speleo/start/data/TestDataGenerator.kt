@@ -142,7 +142,6 @@ class TestDataGenerator @Inject constructor(
 
                         val a = (t * 2) % personIds.size
                         val b = (t * 2 + 1) % personIds.size
-                        // ИСПРАВЛЕНО: statusMember -> status
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
                         if (t % 2 == 1 && t * 2 + 2 < personIds.size) {
@@ -172,7 +171,6 @@ class TestDataGenerator @Inject constructor(
 
                         val a = (t * 2 + 10) % personIds.size
                         val b = (t * 2 + 11) % personIds.size
-                        // ИСПРАВЛЕНО: statusMember -> status
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
                     }
@@ -189,9 +187,9 @@ class TestDataGenerator @Inject constructor(
     suspend fun clearAll() {
         withContext(Dispatchers.IO) {
             try {
-                // Очищаем настройки таймера
-                appSettingsDao.remove("competition_start_timestamp")
-                appSettingsDao.remove("competition_active")
+                // ✅ ИСПРАВЛЕНО: remove → delete
+                appSettingsDao.delete("competition_start_timestamp")
+                appSettingsDao.delete("competition_active")
 
                 // Удаляем в правильном порядке (дети → родители)
                 participantDao.deleteAll()

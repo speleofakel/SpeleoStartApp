@@ -1,10 +1,13 @@
 package com.speleo.start.presentation.screen.teamcard
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,11 +43,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,20 +57,26 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.speleo.start.presentation.component.PersonSearchDialog
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TeamCardScreen(
     teamId: Long,
     onBack: () -> Unit,
     onNavigateToFinish: (() -> Unit)? = null,
-    onNavigateToRouteCard: ((Long) -> Unit)? = null,
+    onNavigateToRouteCard: ((Long) -> Unit)? = null, // ← один параметр
     vm: TeamCardVM = hiltViewModel()
 ) {
     val card by vm.teamCard.collectAsStateWithLifecycle()
-    val routeEntries by vm.routeEntries.collectAsStateWithLifecycle()
-    val routeStats by vm.routeStats.collectAsStateWithLifecycle()
+    val checkpoints by vm.checkpoints.collectAsStateWithLifecycle()
+    val startTimeRelative by vm.startTimeRelative.collectAsStateWithLifecycle()
+    val finishTimeRelative by vm.finishTimeRelative.collectAsStateWithLifecycle()
+    val takenCount by vm.takenCount.collectAsStateWithLifecycle()
+    val totalCheckpoints by vm.totalCheckpointsCount.collectAsStateWithLifecycle()
+    val isMasterMode by vm.isMasterMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     var showMenu by remember { mutableStateOf(false) }
     var showDisbandDialog by remember { mutableStateOf(false) }
@@ -73,6 +84,7 @@ fun TeamCardScreen(
     var showMentorDialog by remember { mutableStateOf(false) }
     var showReplacedHistory by remember { mutableStateOf(false) }
     var showMasterUnlockDialog by remember { mutableStateOf(false) }
+    var showFinishTimeDialog by remember { mutableStateOf(false) }
     var selectedParticipantId by remember { mutableStateOf<Long?>(null) }
     var selectedParticipantName by remember { mutableStateOf("") }
     var selectedParticipantForMentor by remember { mutableStateOf<TeamCardMember?>(null) }
@@ -80,9 +92,13 @@ fun TeamCardScreen(
     var disbandPassword by remember { mutableStateOf("") }
     var masterPassword by remember { mutableStateOf("") }
 
+    var adjustedHours by remember { mutableStateOf("") }
+    var adjustedMinutes by remember { mutableStateOf("") }
+    var adjustedSeconds by remember { mutableStateOf("") }
+
     LaunchedEffect(teamId) {
         vm.loadTeam(teamId)
-        vm.loadRouteCard(teamId)
+        vm.loadCheckpoints(teamId)
     }
 
     LaunchedEffect(Unit) {
@@ -102,7 +118,7 @@ fun TeamCardScreen(
                 }
                 is TeamCardEvent.TeamUpdated -> {
                     vm.loadTeam(event.teamId)
-                    vm.loadRouteCard(event.teamId)
+                    vm.loadCheckpoints(event.teamId)
                 }
             }
         }
@@ -209,28 +225,52 @@ fun TeamCardScreen(
                     }
                 }
 
-                // ===== СТАТИСТИКА ПУТЕВОГО ЛИСТА =====
+                // ===== СТАТУС ПУТЕВОГО ЛИСТА =====
                 item {
-                    RouteCardStatsCard(
-                        stats = routeStats,
-                        onMasterUnlock = { showMasterUnlockDialog = true }
+                    RouteCardStatusCard(
+                        checkpointsEntered = info.checkpointsEntered,
+                        teamStatus = info.status,
+                        takenCount = takenCount,
+                        totalCount = totalCheckpoints,
+                        isMasterMode = isMasterMode,
+                        onMasterUnlock = { showMasterUnlockDialog = true },
+                        onFillRouteCard = { onNavigateToRouteCard?.invoke(teamId) }
                     )
                 }
 
-                // ===== СПИСОК КП =====
-                if (routeEntries.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "🗺️ ПУТЕВОЙ ЛИСТ",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
+                // ===== ВРЕМЕНА =====
+                item {
+                    TimeStatsCard(
+                        status = info.status,
+                        startTime = startTimeRelative,
+                        finishTime = finishTimeRelative,
+                        onFinishTimeClick = {
+                            if (info.status == "finished") {
+                                showFinishTimeDialog = true
+                            }
+                        }
+                    )
+                }
 
-                    items(routeEntries) { entry ->
-                        RouteCardEntryItem(entry = entry)
-                    }
+                // ===== КЛАСТЕРЫ КП =====
+                item {
+                    Text(
+                        text = "🗺️ КОНТРОЛЬНЫЕ ПУНКТЫ",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                item {
+                    CheckpointsGrid(
+                        checkpoints = checkpoints,
+                        onCheckpointClick = { checkpoint ->
+                            if (info.status == "finished" && !info.checkpointsEntered) {
+                                onNavigateToRouteCard?.invoke(teamId)
+                            }
+                        }
+                    )
                 }
 
                 // ===== СОСТАВ КОМАНДЫ =====
@@ -320,7 +360,94 @@ fun TeamCardScreen(
         }
     }
 
-    // ===== ДИАЛОГИ =====
+    // Диалог корректировки времени финиша
+    if (showFinishTimeDialog && card != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showFinishTimeDialog = false
+                adjustedHours = ""
+                adjustedMinutes = ""
+                adjustedSeconds = ""
+            },
+            title = { Text("Корректировка времени финиша") },
+            text = {
+                Column {
+                    Text("Команда №${card!!.number}", fontSize = 14.sp)
+                    Text("Текущее время финиша: $finishTimeRelative", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = adjustedHours,
+                            onValueChange = {
+                                if (it.length <= 2 && it.all { c -> c.isDigit() })
+                                    adjustedHours = it
+                            },
+                            label = { Text("Часы") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = adjustedMinutes,
+                            onValueChange = {
+                                if (it.length <= 2 && it.all { c -> c.isDigit() })
+                                    adjustedMinutes = it
+                            },
+                            label = { Text("Минуты") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = adjustedSeconds,
+                            onValueChange = {
+                                if (it.length <= 2 && it.all { c -> c.isDigit() })
+                                    adjustedSeconds = it
+                            },
+                            label = { Text("Секунды") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+                    Text(
+                        "Введите относительное время от старта (ЧЧ:ММ:СС)",
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val hours = adjustedHours.toIntOrNull() ?: 0
+                        val minutes = adjustedMinutes.toIntOrNull() ?: 0
+                        val seconds = adjustedSeconds.toIntOrNull() ?: 0
+                        val totalSeconds = hours * 3600 + minutes * 60 + seconds
+
+                        if (totalSeconds > 0) {
+                            vm.adjustFinishTimeRelative(totalSeconds)
+                        }
+                        showFinishTimeDialog = false
+                        adjustedHours = ""
+                        adjustedMinutes = ""
+                        adjustedSeconds = ""
+                    },
+                    enabled = adjustedHours.isNotBlank() || adjustedMinutes.isNotBlank() || adjustedSeconds.isNotBlank()
+                ) {
+                    Text("СОХРАНИТЬ")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFinishTimeDialog = false
+                    adjustedHours = ""
+                    adjustedMinutes = ""
+                    adjustedSeconds = ""
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 
     // Диалог расформирования
     if (showDisbandDialog) {
@@ -427,18 +554,24 @@ fun TeamCardScreen(
         )
     }
 
-    // Диалог мастер-разблокировки путевого листа
-    if (showMasterUnlockDialog) {
+    // ===== ДИАЛОГ МАСТЕР-РАЗБЛОКИРОВКИ =====
+    if (showMasterUnlockDialog && card != null) {
         AlertDialog(
             onDismissRequest = {
                 showMasterUnlockDialog = false
                 masterPassword = ""
             },
-            title = { Text("Разблокировка путевого листа") },
+            title = { Text("Мастер-правка путевого листа") },
             text = {
                 Column {
-                    Text("Введите мастер-пароль для временной разблокировки путевого листа.")
-                    Text("После сохранения повторное подтверждение НЕ ТРЕБУЕТСЯ.", fontSize = 12.sp, color = Color(0xFFFF8C00), fontWeight = FontWeight.Bold)
+                    Text("Введите мастер-пароль для разблокировки путевого листа.")
+                    Text("СТАТУСЫ 'ПОДПИСАНО' (секретарь/судья) НЕ ТРЕБУЮТСЯ!",
+                        fontSize = 12.sp,
+                        color = Color(0xFFFF8C00),
+                        fontWeight = FontWeight.Bold)
+                    Text("После сохранения повторное подтверждение НЕ НУЖНО.",
+                        fontSize = 12.sp,
+                        color = Color(0xFFD32F2F))
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = masterPassword,
@@ -451,18 +584,20 @@ fun TeamCardScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (masterPassword == "devdebug") {
-                            vm.unlockRouteCardForEdit(card!!.teamId)
-                            onNavigateToRouteCard?.invoke(card!!.teamId)
+                        if (vm.masterUnlockRouteCard(teamId, masterPassword)) {
+                            onNavigateToRouteCard?.invoke(teamId)
                             showMasterUnlockDialog = false
                             masterPassword = ""
                         } else {
-                            // Неверный пароль
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Неверный мастер-пароль")
+                            }
+                            masterPassword = ""
                         }
                     },
                     enabled = masterPassword.isNotBlank()
                 ) {
-                    Text("РАЗБЛОКИРОВАТЬ")
+                    Text("РАЗБЛОКИРОВАТЬ И РЕДАКТИРОВАТЬ")
                 }
             },
             dismissButton = {
@@ -478,9 +613,164 @@ fun TeamCardScreen(
 }
 
 @Composable
-fun RouteCardStatsCard(
-    stats: RouteCardStats,
-    onMasterUnlock: () -> Unit
+fun RouteCardStatusCard(
+    checkpointsEntered: Boolean,
+    teamStatus: String,
+    takenCount: Int,
+    totalCount: Int,
+    isMasterMode: Boolean,
+    onMasterUnlock: () -> Unit,
+    onFillRouteCard: () -> Unit
+) {
+    val status = when {
+        teamStatus == "disqualified" || teamStatus == "lost" -> RouteCardStatus.CANCELLED
+        checkpointsEntered -> RouteCardStatus.CONFIRMED
+        takenCount > 0 -> RouteCardStatus.IN_PROGRESS
+        else -> RouteCardStatus.EMPTY
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when (status) {
+                RouteCardStatus.CONFIRMED -> Color(0xFF2E7D32).copy(alpha = 0.15f)
+                RouteCardStatus.IN_PROGRESS -> Color(0xFFFF8C00).copy(alpha = 0.15f)
+                RouteCardStatus.CANCELLED -> Color(0xFFD32F2F).copy(alpha = 0.15f)
+                RouteCardStatus.EMPTY -> MaterialTheme.colorScheme.surfaceVariant
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = when (status) {
+                            RouteCardStatus.CONFIRMED -> if (isMasterMode) "👑 МАСТЕР-РЕЖИМ" else "✅ ПУТЕВОЙ ЛИСТ"
+                            RouteCardStatus.IN_PROGRESS -> "📝 ПУТЕВОЙ ЛИСТ"
+                            RouteCardStatus.CANCELLED -> "❌ ПУТЕВОЙ ЛИСТ"
+                            RouteCardStatus.EMPTY -> "📋 ПУТЕВОЙ ЛИСТ"
+                        },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = when (status) {
+                            RouteCardStatus.CONFIRMED -> if (isMasterMode) Color(0xFFF57C00) else Color(0xFF2E7D32)
+                            RouteCardStatus.IN_PROGRESS -> Color(0xFFFF8C00)
+                            RouteCardStatus.CANCELLED -> Color(0xFFD32F2F)
+                            RouteCardStatus.EMPTY -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                    if (status == RouteCardStatus.CANCELLED) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (teamStatus == "disqualified") "СНЯТЫ" else "LOST",
+                            fontSize = 10.sp,
+                            color = Color(0xFFD32F2F),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                when (status) {
+                    RouteCardStatus.CONFIRMED -> {
+                        if (isMasterMode) {
+                            Text(
+                                text = "Мастер-режим: редактирование без потери подтверждений",
+                                fontSize = 11.sp,
+                                color = Color(0xFFF57C00)
+                            )
+                        } else {
+                            Text(
+                                text = "Подтверждён судьёй. Данные закрыты.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF2E7D32)
+                            )
+                        }
+                        TextButton(
+                            onClick = onMasterUnlock,
+                            modifier = Modifier.padding(start = 0.dp)
+                        ) {
+                            Text("🔓 Мастер-правка", fontSize = 11.sp, color = Color(0xFFF57C00))
+                        }
+                    }
+                    RouteCardStatus.IN_PROGRESS -> {
+                        Text(
+                            text = "Заполнено $takenCount из $totalCount КП",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFF8C00)
+                        )
+                        Button(
+                            onClick = onFillRouteCard,
+                            modifier = Modifier.padding(top = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text("📝 ЗАПОЛНИТЬ / ПРОДОЛЖИТЬ", fontSize = 11.sp)
+                        }
+                    }
+                    RouteCardStatus.EMPTY -> {
+                        Text(
+                            text = "Не заполнен",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = onFillRouteCard,
+                            modifier = Modifier.padding(top = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text("📝 ЗАПОЛНИТЬ", fontSize = 11.sp)
+                        }
+                    }
+                    RouteCardStatus.CANCELLED -> {
+                        Text(
+                            text = if (teamStatus == "disqualified") "Команда снята с соревнований" else "Команда потеряна (ПСР)",
+                            fontSize = 11.sp,
+                            color = Color(0xFFD32F2F)
+                        )
+                    }
+                }
+            }
+
+            if (status != RouteCardStatus.CANCELLED) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "$takenCount/$totalCount",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = when {
+                            takenCount == totalCount && status == RouteCardStatus.CONFIRMED -> Color(0xFF2E7D32)
+                            takenCount == totalCount -> Color(0xFF00A86B)
+                            takenCount > 0 -> Color(0xFFFF8C00)
+                            else -> Color.Gray
+                        }
+                    )
+                    Text("КП взято", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+        }
+    }
+}
+
+enum class RouteCardStatus {
+    CONFIRMED,
+    IN_PROGRESS,
+    EMPTY,
+    CANCELLED
+}
+
+@Composable
+fun TimeStatsCard(
+    status: String,
+    startTime: String,
+    finishTime: String,
+    onFinishTimeClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -488,87 +778,44 @@ fun RouteCardStatsCard(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // Статус ПЛ
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("СТАРТ", fontSize = 11.sp, color = Color.Gray)
                 Text(
-                    text = if (stats.isFullyConfirmed) "✅ ПУТЕВОЙ ЛИСТ ПОДТВЕРЖДЁН" else "📋 ПУТЕВОЙ ЛИСТ",
+                    text = startTime,
+                    fontSize = 18.sp,
+                    fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = if (stats.isFullyConfirmed) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
+                    color = if (startTime == "—:—:—") Color.Gray else Color(0xFF00A86B)
                 )
-                if (stats.isFullyConfirmed) {
-                    TextButton(
-                        onClick = onMasterUnlock,
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                    ) {
-                        Text("🔓 Мастер-правка", fontSize = 10.sp, color = Color(0xFFF57C00))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("ФИНИШ", fontSize = 11.sp, color = Color.Gray)
+                Text(
+                    text = finishTime,
+                    fontSize = 18.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = if (status == "finished" && finishTime != "—:—:—") {
+                        Modifier.clickable { onFinishTimeClick() }
+                    } else Modifier,
+                    color = when {
+                        finishTime == "—:—:—" -> Color.Gray
+                        status == "finished" -> Color(0xFF2196F3)
+                        else -> Color(0xFF9E9E9E)
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Статистика
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                )
+                if (status == "finished" && finishTime != "—:—:—") {
                     Text(
-                        text = "${stats.takenCount}/${stats.totalCount}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = Color(0xFF00A86B)
+                        text = "нажмите для изменения",
+                        fontSize = 9.sp,
+                        color = Color(0xFF2196F3)
                     )
-                    Text("Взято КП", fontSize = 10.sp, color = Color.Gray)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "${stats.totalScore}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = Color(0xFF2E7D32)
-                    )
-                    Text("Баллов", fontSize = 10.sp, color = Color.Gray)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "${stats.totalPenalty}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = Color(0xFFD32F2F)
-                    )
-                    Text("Штраф", fontSize = 10.sp, color = Color.Gray)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Время
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Старт", fontSize = 10.sp, color = Color.Gray)
-                    Text(stats.startTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                }
-                Column {
-                    Text("Финиш", fontSize = 10.sp, color = Color.Gray)
-                    Text(stats.finishTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                }
-                Column {
-                    Text("Отсечка", fontSize = 10.sp, color = Color.Gray)
-                    Text(stats.totalOffsetTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                }
-                Column {
-                    Text("Чистое", fontSize = 10.sp, color = Color.Gray)
-                    Text(stats.netTime, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -576,97 +823,62 @@ fun RouteCardStatsCard(
 }
 
 @Composable
-fun RouteCardEntryItem(entry: RouteCardEntryItem) {
-    val statusColor = when {
-        entry.taken && entry.takenWithError -> Color(0xFFFF8C00)
-        entry.taken -> Color(0xFF00A86B)
-        else -> Color.Gray
-    }
+fun CheckpointsGrid(
+    checkpoints: List<CheckpointGridItem>,
+    onCheckpointClick: (CheckpointGridItem) -> Unit
+) {
+    val chunked = checkpoints.chunked(6)
 
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = statusColor.copy(alpha = 0.15f)
-        )
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(statusColor),
-                contentAlignment = Alignment.Center
+        chunked.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "${entry.displayNumber}",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Вес: ${entry.weight}",
-                        fontSize = 12.sp,
-                        color = Color.Gray
+                row.forEach { cp ->
+                    CheckpointCircle(
+                        checkpoint = cp,
+                        onClick = { onCheckpointClick(cp) }
                     )
-                    if (entry.type == "technical") {
-                        Text(
-                            text = "ТЕХНИЧЕСКИЙ",
-                            fontSize = 10.sp,
-                            color = Color(0xFFF57C00),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
-
-                val statusText = when {
-                    entry.taken && entry.takenWithError -> "⚠️ Взят с ошибкой"
-                    entry.taken -> "✅ Взят"
-                    else -> "❌ Не взят"
-                }
-                Text(
-                    text = statusText,
-                    fontSize = 13.sp,
-                    color = statusColor,
-                    fontWeight = FontWeight.Medium
-                )
-
-                if (entry.type == "technical" && entry.taken) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (entry.offsetTime != null && entry.offsetTime != "00:00") {
-                            Text(
-                                text = "⏱️ Отсечка: ${entry.offsetTime}",
-                                fontSize = 11.sp,
-                                color = Color.Gray
-                            )
-                        }
-                        if (entry.penalty > 0) {
-                            Text(
-                                text = "💰 Штраф: ${entry.penalty}",
-                                fontSize = 11.sp,
-                                color = Color(0xFFD32F2F)
-                            )
-                        }
-                    }
+                repeat(6 - row.size) {
+                    Spacer(modifier = Modifier.size(36.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+fun CheckpointCircle(
+    checkpoint: CheckpointGridItem,
+    onClick: () -> Unit
+) {
+    val color = when {
+        checkpoint.taken && checkpoint.takenWithError -> Color(0xFFFF8C00)
+        checkpoint.taken -> Color(0xFF00A86B)
+        else -> Color(0xFF9E9E9E)
+    }
+
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(color)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "${checkpoint.displayNumber}",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp
+        )
     }
 }
 

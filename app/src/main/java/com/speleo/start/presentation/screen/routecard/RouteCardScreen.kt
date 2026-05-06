@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -91,12 +92,11 @@ fun RouteCardScreen(
                     .padding(padding)
                     .padding(12.dp)
             ) {
-                // Информация о команде
                 if (teamInfo != null) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                            containerColor = if (!isReadOnly) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.primaryContainer
                         )
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -109,9 +109,16 @@ fun RouteCardScreen(
                                 text = "Статус: ${teamInfo!!.status}",
                                 fontSize = 14.sp
                             )
-                            if (isReadOnly) {
+                            if (!isReadOnly && teamInfo?.status == "finished") {
                                 Text(
-                                    text = "✅ Путевой лист подтверждён (read-only)",
+                                    text = "🔓 РЕЖИМ МАСТЕР-ПРАВКИ",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFFF57C00),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else if (isReadOnly) {
+                                Text(
+                                    text = "✅ Путевой лист подтверждён",
                                     fontSize = 13.sp,
                                     color = Color(0xFF2E7D32),
                                     fontWeight = FontWeight.Bold
@@ -122,7 +129,6 @@ fun RouteCardScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Список КП
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -138,11 +144,22 @@ fun RouteCardScreen(
                         )
                     }
 
-                    // Кнопки подтверждения (только если не read-only)
-                    if (!isReadOnly && entries.isNotEmpty()) {
+                    if (!isReadOnly && entries.isNotEmpty() && teamInfo?.status == "finished") {
                         item {
                             Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { vm.saveMasterChangesAndClose(onBack) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57C00))
+                            ) {
+                                Text("💾 СОХРАНИТЬ И ЗАКРЫТЬ", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
 
+                    if (isReadOnly && entries.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -151,13 +168,13 @@ fun RouteCardScreen(
                                     onClick = { showSecretaryDialog = true },
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("📝 Подтвердить секретарём", fontSize = 12.sp)
+                                    Text("📝 Секретарь", fontSize = 12.sp)
                                 }
                                 Button(
                                     onClick = { showJudgeDialog = true },
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("⚖️ Подтвердить судьёй", fontSize = 12.sp)
+                                    Text("⚖️ Судья", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -167,7 +184,6 @@ fun RouteCardScreen(
         }
     }
 
-    // Диалог подтверждения секретарём
     if (showSecretaryDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -177,7 +193,7 @@ fun RouteCardScreen(
             title = { Text("Подтверждение секретарём") },
             text = {
                 Column {
-                    Text("Введите пароль секретаря для подтверждения путевого листа.")
+                    Text("Введите пароль секретаря")
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = secretaryPassword,
@@ -193,24 +209,18 @@ fun RouteCardScreen(
                         vm.confirmBySecretary(secretaryPassword)
                         showSecretaryDialog = false
                         secretaryPassword = ""
-                    },
-                    enabled = secretaryPassword.isNotBlank()
-                ) {
-                    Text("ПОДТВЕРДИТЬ")
-                }
+                    }
+                ) { Text("ПОДТВЕРДИТЬ") }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showSecretaryDialog = false
                     secretaryPassword = ""
-                }) {
-                    Text("Отмена")
-                }
+                }) { Text("Отмена") }
             }
         )
     }
 
-    // Диалог подтверждения судьёй
     if (showJudgeDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -220,8 +230,7 @@ fun RouteCardScreen(
             title = { Text("Подтверждение судьёй") },
             text = {
                 Column {
-                    Text("Введите пароль судьи для финального подтверждения путевого листа.")
-                    Text("После подтверждения изменения будут невозможны.", fontSize = 12.sp, color = Color.Gray)
+                    Text("Введите пароль судьи")
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = judgePassword,
@@ -237,19 +246,14 @@ fun RouteCardScreen(
                         vm.confirmByJudge(judgePassword)
                         showJudgeDialog = false
                         judgePassword = ""
-                    },
-                    enabled = judgePassword.isNotBlank()
-                ) {
-                    Text("ПОДТВЕРДИТЬ")
-                }
+                    }
+                ) { Text("ПОДТВЕРДИТЬ") }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showJudgeDialog = false
                     judgePassword = ""
-                }) {
-                    Text("Отмена")
-                }
+                }) { Text("Отмена") }
             }
         )
     }
@@ -264,7 +268,9 @@ fun RouteCardEntryCard(
     onOffsetTimeChange: (String) -> Unit,
     onPenaltyChange: (String) -> Unit
 ) {
-    var offsetTimeText by remember(entry.offsetTime) { mutableStateOf(entry.offsetTime) }
+    var offsetTimeText by remember(entry.checkpointId, entry.offsetTime) {
+        mutableStateOf(entry.offsetTime)
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -276,7 +282,6 @@ fun RouteCardEntryCard(
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Заголовок: номер и вес
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -307,7 +312,6 @@ fun RouteCardEntryCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Чекбоксы "Взят" и "Ошибка"
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -333,7 +337,6 @@ fun RouteCardEntryCard(
                 }
             }
 
-            // Для технических КП — дополнительные поля
             if (entry.type == "technical") {
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -343,8 +346,8 @@ fun RouteCardEntryCard(
                 ) {
                     OutlinedTextField(
                         value = offsetTimeText,
-                        onValueChange = {
-                            val filtered = it.filter { char -> char.isDigit() || char == ':' }
+                        onValueChange = { newValue ->
+                            val filtered = newValue.filter { char -> char.isDigit() || char == ':' }
                             if (filtered.length <= 5) {
                                 offsetTimeText = filtered
                                 if (filtered.isNotBlank() && !filtered.endsWith(":")) {
@@ -360,9 +363,9 @@ fun RouteCardEntryCard(
 
                     OutlinedTextField(
                         value = entry.penalty,
-                        onValueChange = {
-                            if (it.all { char -> char.isDigit() } && it.length <= 3) {
-                                onPenaltyChange(it)
+                        onValueChange = { newValue ->
+                            if (newValue.all { char -> char.isDigit() } && newValue.length <= 3) {
+                                onPenaltyChange(newValue)
                             }
                         },
                         label = { Text("Штраф") },

@@ -1,3 +1,786 @@
+app/src/main/java/com/speleo/start/presentation/screen/routecard/RouteCardScreen.kt>>>
+package com.speleo.start.presentation.screen.routecard
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.collectLatest
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RouteCardScreen(
+    teamId: Long,
+    masterMode: Boolean = false,  // ← НОВЫЙ ПАРАМЕТР
+    onBack: () -> Unit,
+    vm: RouteCardVM = hiltViewModel()
+) {
+    val entries by vm.entries.collectAsStateWithLifecycle()
+    val teamInfo by vm.teamInfo.collectAsStateWithLifecycle()
+    val isReadOnly by vm.isReadOnly.collectAsStateWithLifecycle()
+    val isLoading by vm.isLoading.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var showSecretaryDialog by remember { mutableStateOf(false) }
+    var showJudgeDialog by remember { mutableStateOf(false) }
+    var secretaryPassword by remember { mutableStateOf("") }
+    var judgePassword by remember { mutableStateOf("") }
+
+    LaunchedEffect(teamId, masterMode) {
+        vm.loadRouteCard(teamId, masterMode)  // ← передаём masterMode
+    }
+
+    LaunchedEffect(Unit) {
+        vm.event.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text(if (masterMode) "Путевой лист (Мастер-правка)" else "Путевой лист") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        if (isLoading) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("Загрузка...", fontSize = 18.sp)
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(12.dp)
+            ) {
+                // Информация о команде
+                if (teamInfo != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (masterMode) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Команда №${teamInfo!!.teamNumber} (${teamInfo!!.className}-й класс)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Статус: ${teamInfo!!.status}",
+                                fontSize = 14.sp
+                            )
+                            if (masterMode) {
+                                Text(
+                                    text = "👑 МАСТЕР-РЕЖИМ: редактирование без потери подтверждений",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFFF57C00),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else if (isReadOnly) {
+                                Text(
+                                    text = "✅ Путевой лист подтверждён (read-only)",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF2E7D32),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Список КП (в мастер-режиме игнорируем isReadOnly)
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(entries) { index, entry ->
+                        RouteCardEntryCard(
+                            entry = entry,
+                            isReadOnly = if (masterMode) false else isReadOnly,  // ← мастер-режим разблокирует
+                            onTakenChange = { vm.toggleTaken(index) },
+                            onErrorChange = { vm.toggleError(index) },
+                            onOffsetTimeChange = { vm.updateOffsetTime(index, it) },
+                            onPenaltyChange = { vm.updatePenalty(index, it) }
+                        )
+                    }
+
+                    // Кнопки подтверждения (только если не read-only и не мастер-режим)
+                    if (!isReadOnly && !masterMode && entries.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { showSecretaryDialog = true },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("📝 Подтвердить секретарём", fontSize = 12.sp)
+                                }
+                                Button(
+                                    onClick = { showJudgeDialog = true },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("⚖️ Подтвердить судьёй", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    // Кнопка сохранения для мастер-режима
+                    if (masterMode && entries.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { vm.saveMasterChanges() },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFF57C00)
+                                )
+                            ) {
+                                Text("💾 СОХРАНИТЬ (Мастер-правка)", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Диалог подтверждения секретарём (без изменений)
+    if (showSecretaryDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSecretaryDialog = false
+                secretaryPassword = ""
+            },
+            title = { Text("Подтверждение секретарём") },
+            text = {
+                Column {
+                    Text("Введите пароль секретаря для подтверждения путевого листа.")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = secretaryPassword,
+                        onValueChange = { secretaryPassword = it },
+                        label = { Text("Пароль") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.confirmBySecretary(secretaryPassword)
+                        showSecretaryDialog = false
+                        secretaryPassword = ""
+                    },
+                    enabled = secretaryPassword.isNotBlank()
+                ) {
+                    Text("ПОДТВЕРДИТЬ")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSecretaryDialog = false
+                    secretaryPassword = ""
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
+    // Диалог подтверждения судьёй (без изменений)
+    if (showJudgeDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showJudgeDialog = false
+                judgePassword = ""
+            },
+            title = { Text("Подтверждение судьёй") },
+            text = {
+                Column {
+                    Text("Введите пароль судьи для финального подтверждения путевого листа.")
+                    Text("После подтверждения изменения будут невозможны.", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = judgePassword,
+                        onValueChange = { judgePassword = it },
+                        label = { Text("Пароль") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.confirmByJudge(judgePassword)
+                        showJudgeDialog = false
+                        judgePassword = ""
+                    },
+                    enabled = judgePassword.isNotBlank()
+                ) {
+                    Text("ПОДТВЕРДИТЬ")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showJudgeDialog = false
+                    judgePassword = ""
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun RouteCardEntryCard(
+    entry: RouteCardEntry,
+    isReadOnly: Boolean,
+    onTakenChange: () -> Unit,
+    onErrorChange: () -> Unit,
+    onOffsetTimeChange: (String) -> Unit,
+    onPenaltyChange: (String) -> Unit
+) {
+    var offsetTimeText by remember(entry.checkpointId, entry.offsetTime) {
+        mutableStateOf(entry.offsetTime)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (entry.type == "technical")
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            else
+                MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "КП №${entry.displayNumber}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    if (entry.type == "technical") {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "ТЕХНИЧЕСКИЙ",
+                            fontSize = 10.sp,
+                            color = Color(0xFFF57C00),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Text(
+                    text = "Вес: ${entry.weight}",
+                    fontSize = 14.sp,
+                    color = Color.Gray
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = entry.taken,
+                        onCheckedChange = { if (!isReadOnly) onTakenChange() },
+                        enabled = !isReadOnly
+                    )
+                    Text("Взят", fontSize = 14.sp)
+                }
+
+                if (entry.taken) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = entry.takenWithError,
+                            onCheckedChange = { if (!isReadOnly) onErrorChange() },
+                            enabled = !isReadOnly
+                        )
+                        Text("С ошибкой", fontSize = 14.sp, color = Color(0xFFFF8C00))
+                    }
+                }
+            }
+
+            if (entry.type == "technical") {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = offsetTimeText,
+                        onValueChange = { newValue ->
+                            val filtered = newValue.filter { char -> char.isDigit() || char == ':' }
+                            if (filtered.length <= 5) {
+                                offsetTimeText = filtered
+                                if (filtered.isNotBlank() && !filtered.endsWith(":")) {
+                                    onOffsetTimeChange(filtered)
+                                }
+                            }
+                        },
+                        label = { Text("Отсечка (ММ:СС)") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        enabled = !isReadOnly && entry.taken
+                    )
+
+                    OutlinedTextField(
+                        value = entry.penalty,
+                        onValueChange = { newValue ->
+                            if (newValue.all { char -> char.isDigit() } && newValue.length <= 3) {
+                                onPenaltyChange(newValue)
+                            }
+                        },
+                        label = { Text("Штраф") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        enabled = !isReadOnly && entry.taken
+                    )
+                }
+            }
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/routecard/RouteCardVM.kt>>>
+package com.speleo.start.presentation.screen.routecard
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.entity.TeamRouteCardEntity
+import com.speleo.start.data.repository.MasterRouteCardRepository
+import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.data.repository.TeamRouteCardRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class RouteCardEntry(
+    val checkpointId: Long,
+    val displayNumber: Int,
+    val weight: Int,
+    val type: String,
+    val taken: Boolean = false,
+    val takenWithError: Boolean = false,
+    val offsetTime: String = "",
+    val penalty: String = "0"
+)
+
+data class TeamInfo(
+    val teamId: Long,
+    val teamNumber: Int,
+    val className: String,
+    val status: String
+)
+
+@HiltViewModel
+class RouteCardVM @Inject constructor(
+    private val teamRepo: TeamRepository,
+    private val masterRepo: MasterRouteCardRepository,
+    private val routeCardRepo: TeamRouteCardRepository
+) : ViewModel() {
+
+    private val _entries = MutableStateFlow<List<RouteCardEntry>>(emptyList())
+    val entries: StateFlow<List<RouteCardEntry>> = _entries.asStateFlow()
+
+    private val _teamInfo = MutableStateFlow<TeamInfo?>(null)
+    val teamInfo: StateFlow<TeamInfo?> = _teamInfo.asStateFlow()
+
+    private val _isReadOnly = MutableStateFlow(false)
+    val isReadOnly: StateFlow<Boolean> = _isReadOnly.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _event = MutableSharedFlow<String>()
+    val event: SharedFlow<String> = _event.asSharedFlow()
+
+    private var teamId: Long = 0L
+    private var competitionId: Long = 0L
+    private var isMasterMode = false
+    private var originalEntries: List<RouteCardEntry> = emptyList()
+    private var collectionJob: kotlinx.coroutines.Job? = null
+
+    fun loadRouteCard(teamId: Long, masterMode: Boolean = false) {
+        this.teamId = teamId
+        this.isMasterMode = masterMode
+        viewModelScope.launch {
+            _isLoading.value = true
+            _isReadOnly.value = false  // временно снимаем блокировку для загрузки
+
+            val team = teamRepo.getTeamById(teamId)
+            if (team != null) {
+                competitionId = team.competitionId
+                _teamInfo.value = TeamInfo(
+                    teamId = team.id,
+                    teamNumber = team.teamNumber,
+                    className = team.className,
+                    status = team.status
+                )
+                // В мастер-режиме игнорируем checkpointsEntered
+                if (!masterMode) {
+                    _isReadOnly.value = team.checkpointsEntered
+                }
+            } else {
+                _isLoading.value = false
+                return@launch
+            }
+
+            collectionJob?.cancel()
+            collectionJob = launch {
+                val checkpointsFlow = masterRepo.getRouteCardByCompetition(competitionId)
+                val existingFlow = routeCardRepo.getRouteCardByTeam(teamId)
+
+                combine(checkpointsFlow, existingFlow) { cpList, exList ->
+                    cpList.map { cp ->
+                        val exEntry = exList.find { it.checkpointId == cp.id }
+                        RouteCardEntry(
+                            checkpointId = cp.id,
+                            displayNumber = cp.displayNumber,
+                            weight = cp.weight,
+                            type = cp.type,
+                            taken = exEntry?.taken ?: false,
+                            takenWithError = exEntry?.takenWithError ?: false,
+                            offsetTime = exEntry?.offsetTime?.let { formatSecondsToMmSs(it.toInt()) } ?: "",
+                            penalty = (exEntry?.penalty ?: 0).toString()
+                        )
+                    }
+                }.collect { list ->
+                    _entries.value = list
+                    if (!masterMode) {
+                        originalEntries = list
+                    }
+                    _isLoading.value = false
+                }
+            }
+        }
+    }
+
+    fun toggleTaken(index: Int) {
+        val current = _entries.value.toMutableList()
+        val entry = current[index]
+        current[index] = entry.copy(
+            taken = !entry.taken,
+            takenWithError = if (!entry.taken) false else entry.takenWithError
+        )
+        _entries.value = current
+        if (!isMasterMode) {
+            saveEntry(current[index])
+        }
+    }
+
+    fun toggleError(index: Int) {
+        val current = _entries.value.toMutableList()
+        val entry = current[index]
+        if (entry.taken) {
+            current[index] = entry.copy(takenWithError = !entry.takenWithError)
+            _entries.value = current
+            if (!isMasterMode) {
+                saveEntry(current[index])
+            }
+        }
+    }
+
+    fun updateOffsetTime(index: Int, offsetTime: String) {
+        val current = _entries.value.toMutableList()
+        val entry = current[index]
+        current[index] = entry.copy(offsetTime = offsetTime)
+        _entries.value = current
+        if (!isMasterMode) {
+            saveEntry(current[index])
+        }
+    }
+
+    fun updatePenalty(index: Int, penalty: String) {
+        val current = _entries.value.toMutableList()
+        val entry = current[index]
+        current[index] = entry.copy(penalty = penalty)
+        _entries.value = current
+        if (!isMasterMode) {
+            saveEntry(current[index])
+        }
+    }
+
+    private fun saveEntry(entry: RouteCardEntry) {
+        viewModelScope.launch {
+            val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
+            val teamRouteCard = TeamRouteCardEntity(
+                teamId = teamId,
+                checkpointId = entry.checkpointId,
+                taken = entry.taken,
+                takenWithError = entry.takenWithError,
+                offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
+                penalty = entry.penalty.toIntOrNull() ?: 0,
+                judgeConfirmed = false,
+                secretaryConfirmed = false
+            )
+            routeCardRepo.saveEntry(teamRouteCard)
+        }
+    }
+
+    /**
+     * Сохранение изменений в мастер-режиме с сохранением статусов подтверждения
+     */
+    fun saveMasterChanges() {
+        viewModelScope.launch {
+            val currentEntries = _entries.value
+            for (entry in currentEntries) {
+                val existing = routeCardRepo.getEntry(teamId, entry.checkpointId)
+                val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
+
+                val teamRouteCard = TeamRouteCardEntity(
+                    teamId = teamId,
+                    checkpointId = entry.checkpointId,
+                    taken = entry.taken,
+                    takenWithError = entry.takenWithError,
+                    offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
+                    penalty = entry.penalty.toIntOrNull() ?: 0,
+                    judgeConfirmed = existing?.judgeConfirmed ?: true,
+                    secretaryConfirmed = existing?.secretaryConfirmed ?: true
+                )
+                routeCardRepo.saveEntry(teamRouteCard)
+            }
+
+            val team = teamRepo.getTeamById(teamId)
+            if (team != null) {
+                teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+            }
+
+            _isReadOnly.value = true
+            _event.emit("✅ Путевой лист сохранён в мастер-режиме. Статусы подтверждения сохранены.")
+            isMasterMode = false
+
+            // Перезагружаем для обновления isReadOnly
+            loadRouteCard(teamId, false)
+        }
+    }
+
+    fun confirmBySecretary(password: String) {
+        viewModelScope.launch {
+            if (isMasterMode) {
+                _event.emit("❌ В мастер-режиме подтверждение не требуется. Используйте «СОХРАНИТЬ».")
+                return@launch
+            }
+            if (password == "secret123" || password == "devdebug") {
+                val currentEntries = _entries.value
+                for (entry in currentEntries) {
+                    routeCardRepo.confirmBySecretary(teamId, entry.checkpointId)
+                }
+                _event.emit("✅ Путевой лист подтверждён секретарём")
+            } else {
+                _event.emit("❌ Неверный пароль секретаря")
+            }
+        }
+    }
+
+    fun confirmByJudge(password: String) {
+        viewModelScope.launch {
+            if (isMasterMode) {
+                _event.emit("❌ В мастер-режиме подтверждение не требуется. Используйте «СОХРАНИТЬ».")
+                return@launch
+            }
+            if (password == "judge123" || password == "1234" || password == "devdebug") {
+                val timestamp = System.currentTimeMillis()
+                val currentEntries = _entries.value
+                for (entry in currentEntries) {
+                    routeCardRepo.confirmByJudge(teamId, entry.checkpointId, timestamp)
+                }
+
+                val team = teamRepo.getTeamById(teamId)
+                if (team != null) {
+                    teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+                }
+
+                _isReadOnly.value = true
+                _event.emit("✅ Путевой лист подтверждён судьёй. Данные закрыты для редактирования.")
+            } else {
+                _event.emit("❌ Неверный пароль судьи")
+            }
+        }
+    }
+
+    private fun formatSecondsToMmSs(totalSeconds: Int): String {
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "%02d:%02d".format(minutes, seconds)
+    }
+
+    private fun parseMmSsToSeconds(input: String): Int? {
+        if (input.isBlank()) return null
+        val parts = input.split(":")
+        return if (parts.size == 2) {
+            val minutes = parts[0].toIntOrNull() ?: return null
+            val seconds = parts[1].toIntOrNull() ?: return null
+            if (seconds in 0..59) minutes * 60 + seconds else null
+        } else {
+            null
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/settings/SettingsScreen.kt>>>
+package com.speleo.start.presentation.screen.settings
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки приложения") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+            )
+        }
+    ) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
+            Text("Настройки приложения пока не реализованы.")
+        }
+    }
+}
+<<<конец файла
+
+app/src/main/java/com/speleo/start/presentation/screen/settings/SettingsVM.kt>>>
+package com.speleo.start.presentation.screen.settings
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.speleo.start.data.local.PreferencesManager
+import com.speleo.start.data.repository.CompetitionRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class SettingsVM @Inject constructor(
+    private val competitionRepo: CompetitionRepository,
+    private val prefs: PreferencesManager
+) : ViewModel() {
+
+    private val _startInterval = MutableStateFlow("120")
+    val startInterval: StateFlow<String> = _startInterval.asStateFlow()
+
+    private val _controlTime2 = MutableStateFlow("90")
+    val controlTime2: StateFlow<String> = _controlTime2.asStateFlow()
+
+    private val _controlTime3 = MutableStateFlow("60")
+    val controlTime3: StateFlow<String> = _controlTime3.asStateFlow()
+
+    fun loadSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            // Парсим settingsJson (пока упрощённо — загружаем дефолты)
+        }
+    }
+
+    fun updateInterval(value: String) { _startInterval.value = value }
+    fun updateControlTime2(value: String) { _controlTime2.value = value }
+    fun updateControlTime3(value: String) { _controlTime3.value = value }
+
+    fun saveSettings() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
+            val json = """
+                {
+                    "start_interval": ${_startInterval.value},
+                    "control_time_2": ${_controlTime2.value},
+                    "control_time_3": ${_controlTime3.value}
+                }
+            """.trimIndent()
+            competitionRepo.updateCompetition(comp.copy(settingsJson = json))
+        }
+    }
+}
+<<<конец файла
+
 app/src/main/java/com/speleo/start/presentation/screen/start/StartScreen.kt>>>
 package com.speleo.start.presentation.screen.start
 
@@ -18,6 +801,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -26,6 +810,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,7 +818,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -65,6 +852,11 @@ fun StartScreen(
     val validationError by vm.validationError.collectAsStateWithLifecycle()
     val startInterval by vm.startInterval.collectAsStateWithLifecycle()
     val navigateToTeamCard by vm.navigateToTeamCard.collectAsStateWithLifecycle()
+
+    // ✅ ДОБАВЛЕНО: состояние для диалога остановки таймера
+    var showStopTimerDialog by remember { mutableStateOf(false) }
+    var stopTimerPassword by remember { mutableStateOf("") }
+    var stopTimerError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { vm.loadQueue() }
     LaunchedEffect(queue) { vm.clearValidationError() }
@@ -115,8 +907,11 @@ fun StartScreen(
                     .padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ===== ГЛАВНЫЙ ТАЙМЕР (непаузится) =====
-                TimerDisplay(mainTimer)
+                // ===== ГЛАВНЫЙ ТАЙМЕР (с обработкой долгого тапа) =====
+                TimerDisplay(
+                    mainTimer,
+                    onLongPress = { showStopTimerDialog = true }
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -263,6 +1058,149 @@ fun StartScreen(
                     }
                 }
             }
+        }
+    }
+
+    // ✅ ДОБАВЛЕНО: Диалог остановки главного таймера
+    if (showStopTimerDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showStopTimerDialog = false
+                stopTimerPassword = ""
+                stopTimerError = null
+            },
+            title = { Text("Остановка главного таймера") },
+            text = {
+                Column {
+                    Text("Вы действительно хотите остановить главный таймер?")
+                    Text("Это действие требует пароля судьи.", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = stopTimerPassword,
+                        onValueChange = {
+                            stopTimerPassword = it
+                            stopTimerError = null
+                        },
+                        label = { Text("Пароль") },
+                        singleLine = true,
+                        isError = stopTimerError != null,
+                        supportingText = {
+                            if (stopTimerError != null) {
+                                Text(stopTimerError!!, fontSize = 10.sp, color = Color.Red)
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (vm.timer.stopMainTimer(stopTimerPassword)) {
+                            showStopTimerDialog = false
+                            stopTimerPassword = ""
+                            stopTimerError = null
+                        } else {
+                            stopTimerError = "Неверный пароль"
+                            stopTimerPassword = ""
+                        }
+                    },
+                    enabled = stopTimerPassword.isNotBlank()
+                ) {
+                    Text("ОСТАНОВИТЬ ТАЙМЕР")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showStopTimerDialog = false
+                    stopTimerPassword = ""
+                    stopTimerError = null
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TimerDisplay(
+    millis: Long,
+    modifier: Modifier = Modifier,
+    onLongPress: () -> Unit = {}  // ✅ ДОБАВЛЕНО
+) {
+    val totalSec = millis / 1000
+    val hours = totalSec / 3600
+    val minutes = (totalSec % 3600) / 60
+    val seconds = totalSec % 60
+    val hundredths = (millis % 1000) / 10
+
+    val baseSize = 48.sp
+    val smallSize = 28.sp
+    val timerColor = Color(0xFF00C853)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { },
+                onLongClick = onLongPress  // ✅ ИСПРАВЛЕНО
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                if (hours > 0) {
+                    Text(
+                        "%02d:".format(hours),
+                        fontSize = baseSize,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = timerColor
+                    )
+                } else {
+                    Text(
+                        "00:",
+                        fontSize = smallSize,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = timerColor.copy(alpha = 0.4f)
+                    )
+                }
+                Text(
+                    "%02d:%02d".format(minutes, seconds),
+                    fontSize = baseSize,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = timerColor
+                )
+                Text(
+                    ".%02d".format(hundredths),
+                    fontSize = smallSize,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = timerColor
+                )
+            }
+            Text(
+                "ГЛАВНЫЙ ТАЙМЕР (долгий тап → стоп/сброс)",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
 }
@@ -528,76 +1466,6 @@ private fun QueueItem(
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = FontFamily.Monospace
-            )
-        }
-    }
-}
-
-@Composable
-fun TimerDisplay(millis: Long, modifier: Modifier = Modifier) {
-    val totalSec = millis / 1000
-    val hours = totalSec / 3600
-    val minutes = (totalSec % 3600) / 60
-    val seconds = totalSec % 60
-    val hundredths = (millis % 1000) / 10
-
-    val baseSize = 48.sp
-    val smallSize = 28.sp
-    val timerColor = Color(0xFF00C853)
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                if (hours > 0) {
-                    Text(
-                        "%02d:".format(hours),
-                        fontSize = baseSize,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = timerColor
-                    )
-                } else {
-                    Text(
-                        "00:",
-                        fontSize = smallSize,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = timerColor.copy(alpha = 0.4f)
-                    )
-                }
-                Text(
-                    "%02d:%02d".format(minutes, seconds),
-                    fontSize = baseSize,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = timerColor
-                )
-                Text(
-                    ".%02d".format(hundredths),
-                    fontSize = smallSize,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = timerColor
-                )
-            }
-            Text(
-                "ГЛАВНЫЙ ТАЙМЕР",
-                fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
             )
         }
     }
@@ -936,993 +1804,6 @@ class StartVM @Inject constructor(
     fun clearValidationError() {
         _validationError.value = null
     }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterScreen.kt>>>
-package com.speleo.start.presentation.screen.team
-
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ElevatedButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.speleo.start.data.local.entity.PersonEntity
-import com.speleo.start.presentation.component.TitleCaseTextField
-import com.speleo.start.util.DateValidator
-import com.speleo.start.util.PhoneFormatter
-import kotlinx.coroutines.flow.collectLatest
-import androidx.compose.ui.res.painterResource
-import androidx.compose.material3.Icon
-import com.speleo.start.R
-
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TeamRegisterScreen(
-    onBack: () -> Unit,
-    onNavigateToTeam: (Long) -> Unit = {},
-    vm: TeamRegisterVM = hiltViewModel()
-) {
-    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
-    val searchResults by vm.searchResults.collectAsStateWithLifecycle()
-    val minTeamSize by vm.minTeamSize.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-    var selectedClass by remember { mutableStateOf("2") }
-    var members by remember { mutableStateOf(listOf<MemberDraft>()) }
-    var showMentorPickerFor by remember { mutableStateOf<Int?>(null) }
-    var mentorSearchQuery by remember { mutableStateOf("") }
-    var showConflictDialog by remember { mutableStateOf<Pair<String, TeamRegisterVM.UiEvent.ConflictDialog>?>(null) }
-    val focusManager = LocalFocusManager.current
-
-    LaunchedEffect(Unit) {
-        vm.loadCompetitionSettings()
-        vm.event.collectLatest { event ->
-            when (event) {
-                is TeamRegisterVM.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
-                is TeamRegisterVM.UiEvent.NavigateBack -> onBack()
-                is TeamRegisterVM.UiEvent.ConflictDialog -> showConflictDialog = event.personName to event
-                is TeamRegisterVM.UiEvent.NavigateToTeam -> onNavigateToTeam(event.teamId)
-            }
-        }
-    }
-
-    val allRequirementsMet = remember(members) {
-        members.all { member ->
-            when (member.ageGroup) {
-                AgeGroup.ADULT -> true
-                AgeGroup.MINOR -> member.mentor != null && member.mentorConfirmed
-                AgeGroup.CHILD -> member.mentor != null && member.mentorConfirmed && member.judgeApproved
-                AgeGroup.UNKNOWN -> false
-            }
-        }
-    }
-    val canSave = members.size >= minTeamSize && allRequirementsMet && members.all { it.isValid }
-
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(title = { Text("Регистрация команды") }, navigationIcon = {
-                TextButton(onClick = onBack) { Text("← Назад") }
-            })
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Класс:", fontSize = 14.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("2" to "2-й класс", "3" to "3-й класс").forEach { (v, l) ->
-                    FilterChip(selected = selectedClass == v, onClick = { selectedClass = v }, label = { Text(l) })
-                }
-            }
-
-            val emptyIndex = members.indexOfFirst { it.person == null && !it.isQuickCreate }
-            if (emptyIndex >= 0) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("🔍 Поиск участника ${emptyIndex + 1}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Поле поиска с кнопками внутри (trailingIcon)
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { vm.onSearchQueryChange(it) },
-                            label = { Text("Фамилия") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, keyboardType = KeyboardType.Text),
-                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                            trailingIcon = {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(end = 8.dp)  // 👈 Добавляем отступ справа
-                                ) {
-                                    // Кнопка "+" (создание)
-                                    IconButton(
-                                        onClick = {
-                                            if (searchQuery.isNotBlank()) {
-                                                members = members.toMutableList().also {
-                                                    it[emptyIndex] = members[emptyIndex].copy(
-                                                        isQuickCreate = true,
-                                                        quickLastName = searchQuery.trim()
-                                                    )
-                                                }
-                                                vm.onSearchQueryChange("")
-                                                focusManager.clearFocus()
-                                            }
-                                        },
-                                        enabled = searchQuery.isNotBlank(),
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .background(Color(0xFF4CAF50).copy(alpha = 0.4f), CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                painter = painterResource(id = R.drawable.ic_action_add),
-                                                contentDescription = "Добавить",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-
-                                    // Кнопка "✖" (очистка)
-                                    if (searchQuery.isNotBlank()) {
-                                        IconButton(
-                                            onClick = { vm.onSearchQueryChange("") },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(28.dp)
-                                                    .background(Color(0xFFF44336).copy(alpha = 0.4f), CircleShape),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    painter = painterResource(id = R.drawable.ic_action_clear),
-                                                    contentDescription = "Очистить",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Результаты поиска
-                        AnimatedVisibility(visible = searchResults.isNotEmpty()) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                searchResults.forEach { person ->
-                                    PersonSearchResultItem(
-                                        person = person,
-                                        onClick = {
-                                            vm.onPersonSelected(person) {
-                                                members = members.toMutableList().also {
-                                                    it[emptyIndex] = members[emptyIndex].copy(
-                                                        person = person,
-                                                        ageGroup = calculateAgeGroup(person.birthDate),
-                                                        isQuickCreate = false
-                                                    )
-                                                }
-                                                vm.onSearchQueryChange("")
-                                                focusManager.clearFocus()
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-
-
-                        // Сообщение "ничего не найдено" с кнопкой создания
-                        AnimatedVisibility(visible = searchQuery.length >= 2 && searchResults.isEmpty()) {
-                            Column {
-                                Text(
-                                    "Ничего не найдено",
-                                    fontSize = 13.sp,
-                                    color = Color.Gray,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
-                                Button(
-                                    onClick = {
-                                        members = members.toMutableList().also {
-                                            it[emptyIndex] = members[emptyIndex].copy(
-                                                isQuickCreate = true,
-                                                quickLastName = searchQuery.trim()
-                                            )
-                                        }
-                                        vm.onSearchQueryChange("")
-                                        focusManager.clearFocus()
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_action_add),
-                                        contentDescription = "Добавить",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = Color(0xFF4CAF50).copy(alpha = 0.8f)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Создать: ${searchQuery.trim()}")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Text("Участники (${members.size}/$minTeamSize мин.):", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-            members.forEachIndexed { index, member ->
-                MemberCard(
-                    index = index, member = member,
-                    onRemove = { members = members.toMutableList().also { it.removeAt(index) } },
-                    onToggleJudgeApproval = { members = members.toMutableList().also { it[index] = member.copy(judgeApproved = !member.judgeApproved) } },
-                    onOpenMentorPicker = { showMentorPickerFor = index },
-                    onRemoveMentor = { members = members.toMutableList().also { it[index] = member.copy(mentor = null, mentorConfirmed = false) } },
-                    onUpdateQuickFields = { updated -> members = members.toMutableList().also { it[index] = updated } },
-                    onAutoOpenMentor = { showMentorPickerFor = index },
-                    vm = vm
-                )
-            }
-
-            if (members.size < 6) {
-                OutlinedButton(
-                    onClick = { members = members + MemberDraft() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_action_add),
-                        contentDescription = "Добавить",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Добавить участника")
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { vm.registerTeam(className = selectedClass, members = members) }, modifier = Modifier.fillMaxWidth(), enabled = canSave) {
-                Text("СОХРАНИТЬ КОМАНДУ")
-            }
-            if (!allRequirementsMet && members.isNotEmpty()) {
-                Text("⚠️ Проверьте менторов и разрешения судьи", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-            }
-            Spacer(modifier = Modifier.height(32.dp))
-        }
-    }
-
-    showConflictDialog?.let { (name, event) ->
-        AlertDialog(
-            onDismissRequest = { showConflictDialog = null },
-            title = { Text("Участник занят") },
-            text = { Text("$name уже числится в команде №${event.teamNumber} (${event.className}-й класс). Перейти в карточку команды?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showConflictDialog = null
-                    onNavigateToTeam(event.teamId)
-                }) { Text("Перейти") }
-            },
-            dismissButton = { TextButton(onClick = { showConflictDialog = null }) { Text("Отмена") } }
-        )
-    }
-
-    if (showMentorPickerFor != null) {
-        val memberIndex = showMentorPickerFor!!
-        AlertDialog(
-            onDismissRequest = { showMentorPickerFor = null },
-            title = { Text("Выбор ментора") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = mentorSearchQuery,
-                        onValueChange = { mentorSearchQuery = it; vm.onMentorSearchQueryChange(it) },
-                        label = { Text("🔍 Фамилия ментора (≥18)") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val mentorResults by vm.mentorSearchResults.collectAsStateWithLifecycle()
-                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                        items(mentorResults) { person ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    members = members.toMutableList().also {
-                                        it[memberIndex] = members[memberIndex].copy(mentor = person, mentorConfirmed = true)
-                                    }
-                                    showMentorPickerFor = null; mentorSearchQuery = ""; vm.onMentorSearchQueryChange("")
-                                }.padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("${person.lastName} ${person.firstName}", modifier = Modifier.weight(1f))
-                                val age = DateValidator.calculateAge(person.birthDate)
-                                if (age != null) Text("$age лет", fontSize = 12.sp, color = Color.Gray)
-                            }
-                        }
-                    }
-                    if (mentorResults.isEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        var qLast by remember { mutableStateOf("") }
-                        var qFirst by remember { mutableStateOf("") }
-                        val focusManager = LocalFocusManager.current
-
-                        TitleCaseTextField(
-                            value = qLast,
-                            onValueChange = { qLast = it },
-                            label = "Фамилия ментора",
-                            modifier = Modifier.fillMaxWidth(),
-                            imeAction = ImeAction.Next,
-                            onNext = {
-                                // Пробел или Enter → переход на поле "Имя ментора"
-                                focusManager.moveFocus(FocusDirection.Down)
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        TitleCaseTextField(
-                            value = qFirst,
-                            onValueChange = { qFirst = it },
-                            label = "Имя ментора",
-                            modifier = Modifier.fillMaxWidth(),
-                            imeAction = ImeAction.Done,
-                            onNext = {
-                                // Пробел или Enter → убираем клавиатуру
-                                focusManager.clearFocus()
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = {
-                                if (qLast.isNotBlank() && qFirst.isNotBlank()) {
-                                    vm.createQuickMentor(lastName = qLast, firstName = qFirst) { newId ->
-                                        vm.getPersonById(newId) { person ->
-                                            person?.let {
-                                                members = members.toMutableList().also { list ->
-                                                    list[memberIndex] = list[memberIndex].copy(mentor = person, mentorConfirmed = true)
-                                                }
-                                            }
-                                        }
-                                        showMentorPickerFor = null
-                                        mentorSearchQuery = ""
-                                        vm.onMentorSearchQueryChange("")
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = qLast.isNotBlank() && qFirst.isNotBlank()
-                        ) {
-                            Text("➕ СОЗДАТЬ И ПРИВЯЗАТЬ")
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showMentorPickerFor = null }) { Text("Отмена") } }
-        )
-    }
-}
-
-@Composable
-private fun PersonSearchResultItem(person: PersonEntity, onClick: () -> Unit) {
-    val age = DateValidator.calculateAge(person.birthDate)
-    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
-    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
-    Card(modifier = Modifier.fillMaxWidth().clickable { onClick() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-                Text(person.lastName.take(1).uppercase(), fontSize = 16.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text("${person.lastName} ${person.firstName}", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                if (person.nickname != null) Text("«${person.nickname}»", fontSize = 11.sp, color = Color.Gray)
-            }
-            if (age != null) Text("$age лет", fontSize = 13.sp, color = ageColor)
-        }
-    }
-}
-
-@Composable
-private fun MemberCard(
-    index: Int, member: MemberDraft,
-    onRemove: () -> Unit, onToggleJudgeApproval: () -> Unit,
-    onOpenMentorPicker: () -> Unit, onRemoveMentor: () -> Unit,
-    onUpdateQuickFields: (MemberDraft) -> Unit,
-    onAutoOpenMentor: () -> Unit,
-    vm: TeamRegisterVM
-) {
-    // 👇 Защита: вычисляем effectiveAgeGroup если вдруг не задан
-    val effectiveAgeGroup = if (member.ageGroup != AgeGroup.UNKNOWN) {
-        member.ageGroup
-    } else if (member.person != null) {
-        calculateAgeGroup(member.person.birthDate)
-    } else {
-        AgeGroup.UNKNOWN
-    }
-
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
-        containerColor = when {
-            member.person == null && !member.isQuickCreate -> MaterialTheme.colorScheme.surfaceVariant
-            !member.isValid -> MaterialTheme.colorScheme.errorContainer
-            else -> MaterialTheme.colorScheme.surface
-        }
-    )) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(if (index == 0) "👑 Капитан" else "👤 Участник", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.background(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small).padding(horizontal = 8.dp, vertical = 2.dp))
-                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-                    Text("✕", fontSize = 14.sp, color = MaterialTheme.colorScheme.error)
-                }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            when {
-                member.isQuickCreate -> QuickCreateForm(member = member, onUpdate = onUpdateQuickFields, vm = vm, onAutoOpenMentor = onAutoOpenMentor)
-                member.person != null -> {
-                    val person = member.person!!
-                    val age = DateValidator.calculateAge(person.birthDate)
-                    val ageMark = DateValidator.getAgeColorMark(person.birthDate)
-                    val ageColor = Color(android.graphics.Color.parseColor(ageMark.colorHex))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-                            Text(person.lastName.take(1).uppercase(), fontSize = 18.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("${person.lastName} ${person.firstName}", fontWeight = FontWeight.Medium, fontSize = 15.sp)
-                            if (age != null) Text("$age лет · ${ageMark.label}", fontSize = 12.sp, color = ageColor)
-                        }
-                    }
-                    // 👇 Используем effectiveAgeGroup вместо member.ageGroup
-                    when (effectiveAgeGroup) {
-                        AgeGroup.MINOR, AgeGroup.CHILD -> {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            if (member.mentor != null) MentorRow(mentor = member.mentor!!, onRemoveMentor = onRemoveMentor)
-                            else OutlinedButton(onClick = onOpenMentorPicker, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 4.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                                Text("⚠️ Ментор", fontSize = 12.sp)
-                            }
-                            if (effectiveAgeGroup == AgeGroup.CHILD) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(32.dp)) {
-                                    Checkbox(checked = member.judgeApproved, onCheckedChange = { onToggleJudgeApproval() }, modifier = Modifier.size(32.dp))
-                                    Text("Разрешено судьёй", fontSize = 12.sp)
-                                }
-                            }
-                        }
-                        else -> {}
-                    }
-                }
-                else -> Text("Введите фамилию в поле поиска выше", color = Color.Gray, fontSize = 13.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun MentorRow(mentor: PersonEntity, onRemoveMentor: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("👨‍🏫 ${mentor.lastName} ${mentor.firstName}", fontSize = 13.sp, color = Color(0xFF1E5A7A))
-        TextButton(onClick = onRemoveMentor, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("Сменить", fontSize = 11.sp) }
-    }
-}
-
-@Composable
-private fun QuickCreateForm(
-    member: MemberDraft,
-    onUpdate: (MemberDraft) -> Unit,
-    vm: TeamRegisterVM,
-    onAutoOpenMentor: () -> Unit = {}
-) {
-    var showExtra by remember { mutableStateOf(false) }
-    val focusManager = LocalFocusManager.current
-    val isDateValid = member.quickBirthDate.isBlank() || (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate))
-    val dateHasError = member.quickBirthDate.isNotBlank() && !isDateValid
-    val age = if (member.quickBirthDate.length == 10 && DateValidator.isRealDate(member.quickBirthDate)) DateValidator.calculateAge(member.quickBirthDate) else null
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        TitleCaseTextField(
-            value = member.quickLastName,
-            onValueChange = { onUpdate(member.copy(quickLastName = it)) },
-            label = "Фамилия",
-            modifier = Modifier.fillMaxWidth(),
-            onNext = { focusManager.moveFocus(FocusDirection.Down) }
-        )
-        TitleCaseTextField(
-            value = member.quickFirstName,
-            onValueChange = { onUpdate(member.copy(quickFirstName = it)) },
-            label = "Имя",
-            modifier = Modifier.fillMaxWidth(),
-            onNext = { focusManager.moveFocus(FocusDirection.Down) }
-        )
-
-        TextButton(
-            onClick = { showExtra = !showExtra },
-            contentPadding = PaddingValues(vertical = 0.dp)
-        ) {
-            Text(if (showExtra) "▾ Доп." else "▸ Доп.", fontSize = 12.sp)
-        }
-
-        AnimatedVisibility(visible = showExtra) {
-            TitleCaseTextField(
-                value = member.quickMiddleName,
-                onValueChange = { onUpdate(member.copy(quickMiddleName = it)) },
-                label = "Отчество",
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // Дата рождения
-        var dateState by remember {
-            mutableStateOf(TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length)))
-        }
-
-        LaunchedEffect(member.quickBirthDate) {
-            if (dateState.text != member.quickBirthDate) {
-                dateState = TextFieldValue(member.quickBirthDate, TextRange(member.quickBirthDate.length))
-            }
-        }
-
-        OutlinedTextField(
-            value = dateState,
-            onValueChange = { newVal ->
-                val oldCursor = newVal.selection.start
-                val digits = newVal.text.filter { it.isDigit() }.take(8)
-                val formatted = buildString {
-                    for (i in digits.indices) {
-                        if (i == 2 || i == 4) append(".")
-                        append(digits[i])
-                    }
-                }
-                val digitsBeforeCursor = newVal.text.take(oldCursor).count { it.isDigit() }
-                val dotsBeforeCursor = (digitsBeforeCursor / 2).coerceAtMost(2)
-                val newCursor = (digitsBeforeCursor + dotsBeforeCursor).coerceIn(0, formatted.length)
-
-                dateState = newVal.copy(text = formatted, selection = TextRange(newCursor))
-                onUpdate(member.copy(quickBirthDate = formatted))
-                if (formatted.length == 10) focusManager.moveFocus(FocusDirection.Down)
-            },
-            label = { Text(if (dateHasError) "Некорректная дата" else "Дата рождения") },
-            isError = dateHasError,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-        )
-
-        if (dateHasError) {
-            Text("Некорректная дата", color = Color(0xFFD32F2F), fontSize = 11.sp, modifier = Modifier.padding(start = 16.dp))
-        } else if (age != null) {
-            val color = when {
-                age < 14 -> Color(0xFFD32F2F)
-                age in 14..17 -> Color(0xFFFF8C00)
-                age > 70 -> Color(0xFFFF8C00)
-                else -> Color(0xFF00A86B)
-            }
-            Text("Возраст: $age лет", color = color, fontSize = 12.sp)
-        }
-
-        // Телефон
-        var phoneState by remember {
-            mutableStateOf(TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length)))
-        }
-
-        LaunchedEffect(member.quickPhone) {
-            if (phoneState.text != member.quickPhone) {
-                phoneState = TextFieldValue(member.quickPhone, TextRange(member.quickPhone.length))
-            }
-        }
-
-        OutlinedTextField(
-            value = phoneState,
-            onValueChange = { newVal ->
-                val digits = newVal.text.filter { it.isDigit() }
-                val formatted = PhoneFormatter.formatAsYouType(digits)
-                phoneState = TextFieldValue(formatted, TextRange(formatted.length))
-                onUpdate(member.copy(quickPhone = formatted))
-            },
-            label = { Text("Телефон") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
-        )
-
-        // Пол
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("male" to "М", "female" to "Ж").forEach { (v, l) ->
-                FilterChip(
-                    selected = member.quickGender == v,
-                    onClick = { onUpdate(member.copy(quickGender = v)) },
-                    label = { Text(l, fontSize = 12.sp) }
-                )
-            }
-        }
-
-        val canSavePerson = member.quickLastName.isNotBlank() && member.quickFirstName.isNotBlank() && isDateValid
-
-        Button(
-            onClick = {
-                vm.createQuickPerson(
-                    lastName = member.quickLastName,
-                    firstName = member.quickFirstName,
-                    middleName = member.quickMiddleName.ifBlank { null },
-                    birthDate = member.quickBirthDate.ifBlank { null },
-                    phone = member.quickPhone.ifBlank { null },
-                    gender = member.quickGender
-                ) { savedId ->
-                    vm.getPersonById(savedId) { person ->
-                        person?.let {
-                            onUpdate(member.copy(
-                                person = it,
-                                isQuickCreate = false,
-                                ageGroup = calculateAgeGroup(it.birthDate)
-                            ))
-                            val pAge = DateValidator.calculateAge(it.birthDate)
-                            if (pAge != null && pAge < 18) onAutoOpenMentor()
-                        }
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = canSavePerson
-        ) {
-            Text("💾 СОХРАНИТЬ", fontSize = 13.sp)
-        }
-    }
-}
-
-private fun calculateAgeGroup(birthDate: String?): AgeGroup {
-    val age = DateValidator.calculateAge(birthDate) ?: return AgeGroup.UNKNOWN
-    return when { age >= 18 -> AgeGroup.ADULT; age in 14..17 -> AgeGroup.MINOR; else -> AgeGroup.CHILD }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/team/TeamRegisterVM.kt>>>
-package com.speleo.start.presentation.screen.team
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.speleo.start.data.local.PreferencesManager
-import com.speleo.start.data.local.entity.PersonEntity
-import com.speleo.start.data.repository.CompetitionRepository
-import com.speleo.start.data.repository.ParticipantRepository
-import com.speleo.start.data.repository.PersonRepository
-import com.speleo.start.data.repository.TeamRepository
-import com.speleo.start.util.DateValidator
-import com.speleo.start.util.normalizeName
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class TeamRegisterVM @Inject constructor(
-    private val teamRepo: TeamRepository,
-    private val personRepo: PersonRepository,
-    private val participantRepo: ParticipantRepository,
-    private val competitionRepo: CompetitionRepository,
-    private val prefs: PreferencesManager
-) : ViewModel() {
-
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _mentorSearchQuery = MutableStateFlow("")
-    val mentorSearchQuery: StateFlow<String> = _mentorSearchQuery.asStateFlow()
-
-    val searchResults = _searchQuery
-        .debounce(300)
-        .flatMapLatest { query ->
-            if (query.length >= 2) personRepo.searchPersons(query) else flowOf(emptyList())
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val mentorSearchResults = _mentorSearchQuery
-        .debounce(300)
-        .flatMapLatest { query ->
-            if (query.length >= 2) {
-                personRepo.searchPersons(query).map { list ->
-                    list.filter { person ->
-                        val age = DateValidator.calculateAge(person.birthDate)
-                        age != null && age >= 18
-                    }
-                }
-            } else flowOf(emptyList())
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    private val _minTeamSize = MutableStateFlow(2)
-    val minTeamSize: StateFlow<Int> = _minTeamSize.asStateFlow()
-
-    private val _event = MutableSharedFlow<UiEvent>()
-    val event: SharedFlow<UiEvent> = _event.asSharedFlow()
-
-    sealed class UiEvent {
-        data class ShowMessage(val message: String) : UiEvent()
-        data class ConflictDialog(val personName: String, val teamNumber: Int, val className: String, val teamId: Long) : UiEvent()
-        data class NavigateToTeam(val teamId: Long) : UiEvent()
-        object NavigateBack : UiEvent()
-    }
-
-    fun loadCompetitionSettings() {
-        viewModelScope.launch {
-            val cid = prefs.activeCompetitionId
-            if (cid == -1L) return@launch
-            val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
-            val json = comp.settingsJson
-            val minSize = try {
-                """"min_team_size"\s*:\s*(\d+)""".toRegex().find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 2
-            } catch (e: Exception) { 2 }
-            _minTeamSize.value = minSize
-        }
-    }
-
-    fun onSearchQueryChange(query: String) { _searchQuery.value = query }
-    fun onMentorSearchQueryChange(query: String) { _mentorSearchQuery.value = query }
-
-    fun onPersonSelected(person: PersonEntity, onSelect: () -> Unit) {
-        viewModelScope.launch {
-            val compId = prefs.activeCompetitionId
-            if (compId == -1L) return@launch
-            val existing = participantRepo.findActiveByPersonAndComp(person.id, compId)
-            if (existing != null) {
-                val team = teamRepo.getTeamById(existing.teamId)
-                if (team != null) {
-                    _event.emit(UiEvent.ConflictDialog(
-                        personName = "${person.lastName} ${person.firstName}",
-                        teamNumber = team.teamNumber,
-                        className = team.className,
-                        teamId = team.id
-                    ))
-                    return@launch
-                }
-            }
-            onSelect()
-        }
-    }
-
-    fun getPersonById(id: Long, callback: (PersonEntity?) -> Unit) {
-        viewModelScope.launch { callback(personRepo.getPersonById(id)) }
-    }
-
-    fun createQuickMentor(lastName: String, firstName: String, onCreated: (Long) -> Unit) {
-        viewModelScope.launch {
-            // FIX: Имя обязательно для ментора
-            if (firstName.isBlank()) {
-                _event.emit(UiEvent.ShowMessage("Введите имя ментора"))
-                return@launch
-            }
-
-            val normalizedLastName = lastName.normalizeName()
-            val normalizedFirstName = firstName.normalizeName()
-
-            val id = personRepo.createPerson(
-                lastName = normalizedLastName,
-                firstName = normalizedFirstName,
-                birthDate = null,
-                gender = null
-            )
-            if (id != -1L) {
-                _event.emit(UiEvent.ShowMessage("Ментор создан"))
-                onCreated(id)
-            } else {
-                _event.emit(UiEvent.ShowMessage("Ошибка создания ментора"))
-            }
-        }
-    }
-
-    fun createQuickPerson(
-        lastName: String,
-        firstName: String,
-        middleName: String?,
-        birthDate: String?,
-        phone: String?,
-        gender: String?,
-        onCreated: (Long) -> Unit
-    ) {
-        viewModelScope.launch {
-            val normalizedLastName = lastName.normalizeName()
-            val normalizedFirstName = firstName.normalizeName()
-            val normalizedMiddleName = middleName?.normalizeName()
-
-            val id = personRepo.createPerson(
-                lastName = normalizedLastName,
-                firstName = normalizedFirstName,
-                middleName = normalizedMiddleName,
-                birthDate = birthDate,
-                phone = phone,
-                gender = gender
-            )
-            if (id != -1L) {
-                _event.emit(UiEvent.ShowMessage("Персона создана"))
-                onCreated(id)
-            } else {
-                _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
-            }
-        }
-    }
-
-    fun registerTeam(className: String, members: List<MemberDraft>) {
-        viewModelScope.launch {
-            val competitionId = prefs.activeCompetitionId
-            if (competitionId == -1L) {
-                _event.emit(UiEvent.ShowMessage("Нет активного соревнования"))
-                return@launch
-            }
-
-            val resolvedMembers = members.map { draft ->
-                if (draft.isQuickCreate) {
-                    val normalizedLastName = draft.quickLastName.normalizeName()
-                    val normalizedFirstName = draft.quickFirstName.normalizeName()
-                    val normalizedMiddleName = if (draft.quickMiddleName.isNotBlank()) draft.quickMiddleName.normalizeName() else null
-
-                    val personId = personRepo.createPerson(
-                        lastName = normalizedLastName,
-                        firstName = normalizedFirstName,
-                        middleName = normalizedMiddleName,
-                        birthDate = draft.quickBirthDate.ifBlank { null },
-                        phone = draft.quickPhone.ifBlank { null },
-                        gender = draft.quickGender
-                    )
-                    if (personId == -1L) {
-                        _event.emit(UiEvent.ShowMessage("Ошибка создания персоны"))
-                        return@launch
-                    }
-                    val savedPerson = personRepo.getPersonById(personId)
-                    if (savedPerson != null) draft.copy(person = savedPerson, isQuickCreate = false) else draft
-                } else draft
-            }
-
-            val invalidMembers = resolvedMembers.filter { member ->
-                when (member.ageGroup) {
-                    AgeGroup.MINOR -> member.mentor == null || !member.mentorConfirmed
-                    AgeGroup.CHILD -> member.mentor == null || !member.mentorConfirmed || !member.judgeApproved
-                    else -> false
-                }
-            }
-            if (invalidMembers.isNotEmpty()) {
-                _event.emit(UiEvent.ShowMessage("Проверьте менторов и разрешения судьи"))
-                return@launch
-            }
-
-            val maxNumber = teamRepo.getMaxTeamNumber(competitionId, className) ?: 0
-            val teamNumber = maxNumber + 1
-            val teamId = teamRepo.createTeam(competitionId = competitionId, teamNumber = teamNumber, className = className)
-            if (teamId == -1L) {
-                _event.emit(UiEvent.ShowMessage("Ошибка создания команды"))
-                return@launch
-            }
-
-            resolvedMembers.forEachIndexed { index, member ->
-                val person = member.person ?: return@forEachIndexed
-                val mentorId = member.mentor?.id
-                val participantId = participantRepo.addParticipant(
-                    teamId = teamId, personId = person.id,
-                    role = if (index == 0) "captain" else "member", mentorId = mentorId
-                )
-                if (participantId == -1L) {
-                    _event.emit(UiEvent.ShowMessage("Ошибка добавления участника"))
-                    return@launch
-                }
-                if (mentorId != null || member.judgeApproved) {
-                    participantRepo.updateMentorAndFlags(
-                        id = participantId, mentorId = mentorId,
-                        mentorConfirmed = member.mentor != null,
-                        judgeApproved = member.judgeApproved
-                    )
-                }
-            }
-            _event.emit(UiEvent.ShowMessage("Команда №$teamNumber сохранена"))
-            _event.emit(UiEvent.NavigateBack)
-        }
-    }
-}
-
-enum class AgeGroup { ADULT, MINOR, CHILD, UNKNOWN }
-
-data class MemberDraft(
-    val person: PersonEntity? = null,
-    val isQuickCreate: Boolean = false,
-    val ageGroup: AgeGroup = AgeGroup.UNKNOWN,
-    val mentor: PersonEntity? = null,
-    val mentorConfirmed: Boolean = false,
-    val judgeApproved: Boolean = false,
-    var quickLastName: String = "",
-    var quickFirstName: String = "",
-    var quickMiddleName: String = "",
-    var quickBirthDate: String = "",
-    var quickPhone: String = "",
-    var quickGender: String = "male"
-) {
-    val isValid: Boolean
-        get() = when {
-            person != null -> true
-            isQuickCreate -> quickLastName.isNotBlank() && quickFirstName.isNotBlank() &&
-                    (quickBirthDate.isBlank() || (quickBirthDate.length == 10 && DateValidator.isRealDate(quickBirthDate)))
-            else -> false
-        }
 }
 <<<конец файла
 

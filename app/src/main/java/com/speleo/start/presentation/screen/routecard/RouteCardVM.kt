@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -55,17 +54,12 @@ class RouteCardVM @Inject constructor(
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _isSecretaryConfirmed = MutableStateFlow(false)
-    val isSecretaryConfirmed: StateFlow<Boolean> = _isSecretaryConfirmed.asStateFlow()
-
-    private val _isJudgeConfirmed = MutableStateFlow(false)
-    val isJudgeConfirmed: StateFlow<Boolean> = _isJudgeConfirmed.asStateFlow()
-
     private val _event = MutableSharedFlow<String>()
     val event: SharedFlow<String> = _event.asSharedFlow()
 
     private var teamId: Long = 0L
     private var competitionId: Long = 0L
+    private var collectionJob: kotlinx.coroutines.Job? = null
 
     fun loadRouteCard(teamId: Long) {
         this.teamId = teamId
@@ -87,31 +81,29 @@ class RouteCardVM @Inject constructor(
                 return@launch
             }
 
-            val checkpointsFlow = masterRepo.getRouteCardByCompetition(competitionId)
-            val existingFlow = routeCardRepo.getRouteCardByTeam(teamId)
+            collectionJob?.cancel()
+            collectionJob = launch {
+                val checkpointsFlow = masterRepo.getRouteCardByCompetition(competitionId)
+                val existingFlow = routeCardRepo.getRouteCardByTeam(teamId)
 
-            combine(checkpointsFlow, existingFlow) { cpList, exList ->
-                if (exList.isNotEmpty()) {
-                    _isSecretaryConfirmed.value = exList.all { it.secretaryConfirmed }
-                    _isJudgeConfirmed.value = exList.all { it.judgeConfirmed }
+                combine(checkpointsFlow, existingFlow) { cpList, exList ->
+                    cpList.map { cp ->
+                        val exEntry = exList.find { it.checkpointId == cp.id }
+                        RouteCardEntry(
+                            checkpointId = cp.id,
+                            displayNumber = cp.displayNumber,
+                            weight = cp.weight,
+                            type = cp.type,
+                            taken = exEntry?.taken ?: false,
+                            takenWithError = exEntry?.takenWithError ?: false,
+                            offsetTime = exEntry?.offsetTime?.let { formatSecondsToMmSs(it.toInt()) } ?: "",
+                            penalty = (exEntry?.penalty ?: 0).toString()
+                        )
+                    }
+                }.collect { list ->
+                    _entries.value = list
+                    _isLoading.value = false
                 }
-
-                cpList.map { cp ->
-                    val exEntry = exList.find { it.checkpointId == cp.id }
-                    RouteCardEntry(
-                        checkpointId = cp.id,
-                        displayNumber = cp.displayNumber,
-                        weight = cp.weight,
-                        type = cp.type,
-                        taken = exEntry?.taken ?: false,
-                        takenWithError = exEntry?.takenWithError ?: false,
-                        offsetTime = exEntry?.offsetTime?.let { formatSecondsToMmSs(it.toInt()) } ?: "",
-                        penalty = (exEntry?.penalty ?: 0).toString()
-                    )
-                }
-            }.collect { list ->
-                _entries.value = list
-                _isLoading.value = false
             }
         }
     }
@@ -124,7 +116,9 @@ class RouteCardVM @Inject constructor(
             takenWithError = if (!entry.taken) false else entry.takenWithError
         )
         _entries.value = current
-        saveEntry(current[index])
+        if (!_isReadOnly.value) {
+            saveEntry(current[index])
+        }
     }
 
     fun toggleError(index: Int) {
@@ -133,7 +127,9 @@ class RouteCardVM @Inject constructor(
         if (entry.taken) {
             current[index] = entry.copy(takenWithError = !entry.takenWithError)
             _entries.value = current
-            saveEntry(current[index])
+            if (!_isReadOnly.value) {
+                saveEntry(current[index])
+            }
         }
     }
 
@@ -142,7 +138,9 @@ class RouteCardVM @Inject constructor(
         val entry = current[index]
         current[index] = entry.copy(offsetTime = offsetTime)
         _entries.value = current
-        saveEntry(current[index])
+        if (!_isReadOnly.value) {
+            saveEntry(current[index])
+        }
     }
 
     fun updatePenalty(index: Int, penalty: String) {
@@ -150,7 +148,9 @@ class RouteCardVM @Inject constructor(
         val entry = current[index]
         current[index] = entry.copy(penalty = penalty)
         _entries.value = current
-        saveEntry(current[index])
+        if (!_isReadOnly.value) {
+            saveEntry(current[index])
+        }
     }
 
     private fun saveEntry(entry: RouteCardEntry) {
@@ -167,21 +167,49 @@ class RouteCardVM @Inject constructor(
                 secretaryConfirmed = false
             )
             routeCardRepo.saveEntry(teamRouteCard)
-            refreshConfirmationStatus()
+        }
+    }
+
+    fun saveMasterChangesAndClose(onSaved: () -> Unit) {
+        viewModelScope.launch {
+            // Сохраняем все изменения, сохраняя старые подписи
+            for (entry in _entries.value) {
+                val existing = routeCardRepo.getEntry(teamId, entry.checkpointId)
+                val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
+
+                val teamRouteCard = TeamRouteCardEntity(
+                    teamId = teamId,
+                    checkpointId = entry.checkpointId,
+                    taken = entry.taken,
+                    takenWithError = entry.takenWithError,
+                    offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
+                    penalty = entry.penalty.toIntOrNull() ?: 0,
+                    judgeConfirmed = existing?.judgeConfirmed ?: false,
+                    secretaryConfirmed = existing?.secretaryConfirmed ?: false
+                )
+                routeCardRepo.saveEntry(teamRouteCard)
+            }
+
+            // Блокируем команду обратно
+            val team = teamRepo.getTeamById(teamId)
+            if (team != null) {
+                teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+            }
+
+            _event.emit("✅ Изменения сохранены")
+            onSaved()
         }
     }
 
     fun confirmBySecretary(password: String) {
         viewModelScope.launch {
             if (password == "secret123" || password == "devdebug") {
-                val currentEntries = _entries.value
-                for (entry in currentEntries) {
+                for (entry in _entries.value) {
                     routeCardRepo.confirmBySecretary(teamId, entry.checkpointId)
                 }
-                _event.emit("✅ Путевой лист подтверждён секретарём")
-                refreshConfirmationStatus()
+                _event.emit("✅ Подтверждено секретарём")
             } else {
-                _event.emit("❌ Неверный пароль секретаря")
+                _event.emit("❌ Неверный пароль")
             }
         }
     }
@@ -190,30 +218,18 @@ class RouteCardVM @Inject constructor(
         viewModelScope.launch {
             if (password == "judge123" || password == "1234" || password == "devdebug") {
                 val timestamp = System.currentTimeMillis()
-                val currentEntries = _entries.value
-                for (entry in currentEntries) {
+                for (entry in _entries.value) {
                     routeCardRepo.confirmByJudge(teamId, entry.checkpointId, timestamp)
                 }
-
                 val team = teamRepo.getTeamById(teamId)
                 if (team != null) {
                     teamRepo.updateTeam(team.copy(checkpointsEntered = true))
                 }
-
                 _isReadOnly.value = true
-                _event.emit("✅ Путевой лист подтверждён судьёй. Данные закрыты для редактирования.")
-                refreshConfirmationStatus()
+                _event.emit("✅ Подтверждено судьёй")
             } else {
-                _event.emit("❌ Неверный пароль судьи")
+                _event.emit("❌ Неверный пароль")
             }
-        }
-    }
-
-    private suspend fun refreshConfirmationStatus() {
-        val entries = routeCardRepo.getRouteCardByTeam(teamId).first()
-        if (entries.isNotEmpty()) {
-            _isSecretaryConfirmed.value = entries.all { it.secretaryConfirmed }
-            _isJudgeConfirmed.value = entries.all { it.judgeConfirmed }
         }
     }
 

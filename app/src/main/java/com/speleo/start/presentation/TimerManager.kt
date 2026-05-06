@@ -66,8 +66,12 @@ class TimerManager @Inject constructor(
                 _countdown.value = savedCountdown ?: savedInterval
                 _countdownPaused.value = wasPaused
                 startMainLoop(keepStartRef = true)
+                // ✅ ИСПРАВЛЕНО: запускаем countdown loop если не на паузе и countdown > 0
                 if (!wasPaused && _countdown.value > 0) {
                     startCountdownLoop()
+                } else if (_countdown.value > 0) {
+                    // Если на паузе, не запускаем, но значение уже восстановлено
+                    // Это нормально
                 }
             }
         }
@@ -108,7 +112,8 @@ class TimerManager @Inject constructor(
 
         CoroutineScope(Dispatchers.IO).launch {
             settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "false"))
-            settingsDao.remove(KEY_START_TIMESTAMP)
+            // ✅ ИСПРАВЛЕНО: используем delete вместо remove
+            settingsDao.delete(KEY_START_TIMESTAMP)
         }
 
         return true
@@ -135,9 +140,11 @@ class TimerManager @Inject constructor(
             while (isActive && _countdown.value > 0 && _started.value) {
                 if (!_countdownPaused.value) {
                     delay(1000)
-                    _countdown.value -= 1
-                    // Сохраняем для восстановления после краша
-                    settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_VALUE, _countdown.value.toString()))
+                    if (_countdown.value > 0) {
+                        _countdown.value -= 1
+                        // Сохраняем для восстановления после краша
+                        settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_VALUE, _countdown.value.toString()))
+                    }
                 } else {
                     delay(100)
                 }
@@ -188,10 +195,11 @@ class TimerManager @Inject constructor(
         _isFirstStart.value = true
         CoroutineScope(Dispatchers.IO).launch {
             settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "false"))
-            settingsDao.remove(KEY_COUNTDOWN_VALUE)
-            settingsDao.remove(KEY_COUNTDOWN_PAUSED)
-            settingsDao.remove(KEY_FIRST_TEAM_STARTED)
-            settingsDao.remove(KEY_CURRENT_INTERVAL)
+            // ✅ ИСПРАВЛЕНО: используем delete вместо remove
+            settingsDao.delete(KEY_COUNTDOWN_VALUE)
+            settingsDao.delete(KEY_COUNTDOWN_PAUSED)
+            settingsDao.delete(KEY_FIRST_TEAM_STARTED)
+            settingsDao.delete(KEY_CURRENT_INTERVAL)
         }
     }
 }

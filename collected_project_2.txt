@@ -1,3 +1,38 @@
+app/src/main/java/com/speleo/start/presentation/Navigation.kt>>>
+package com.speleo.start.presentation
+
+sealed class Screen(val route: String) {
+    object Home : Screen("home")
+    object Competitions : Screen("competitions")
+    object RouteCardDetail : Screen("route_card_detail/{teamId}") {
+        fun pass(id: Long) = "route_card_detail/$id"
+    }
+    object PersonDetail : Screen("person_detail/{personId}") {
+        fun createRoute(personId: Long) = "person_detail/$personId"
+    }
+    object Start : Screen("start")
+    object Finish : Screen("finish")
+    object Register : Screen("register")
+    object TeamList : Screen("team_list")
+    object Persons : Screen("persons")
+    object Results : Screen("results")
+    object Settings : Screen("settings")
+    object RouteCard : Screen("route_card")
+    object CreateCompetition : Screen("create_competition")
+    object Checkpoints : Screen("checkpoints/{competitionId}") {
+        fun pass(id: Long) = "checkpoints/$id"
+    }
+    object PersonNew : Screen("person_new")
+    object CompetitionSettings : Screen("competition_settings/{competitionId}") {
+        fun pass(id: Long) = "competition_settings/$id"
+    }
+    object TeamCard : Screen("team_card/{teamId}") {
+        fun pass(id: Long) = "team_card/$id"
+    }
+}
+
+<<<конец файла
+
 app/src/main/java/com/speleo/start/presentation/TimerManager.kt>>>
 package com.speleo.start.presentation
 
@@ -66,9 +101,13 @@ class TimerManager @Inject constructor(
                 _isFirstStart.value = !firstStarted
                 _countdown.value = savedCountdown ?: savedInterval
                 _countdownPaused.value = wasPaused
-                startMainLoop()
+                startMainLoop(keepStartRef = true)
+                // ✅ ИСПРАВЛЕНО: запускаем countdown loop если не на паузе и countdown > 0
                 if (!wasPaused && _countdown.value > 0) {
                     startCountdownLoop()
+                } else if (_countdown.value > 0) {
+                    // Если на паузе, не запускаем, но значение уже восстановлено
+                    // Это нормально
                 }
             }
         }
@@ -89,15 +128,42 @@ class TimerManager @Inject constructor(
         _mainTimer.value = 0L
         _countdown.value = startInterval
         _countdownPaused.value = false
-        startMainLoop()
+        startMainLoop(keepStartRef = false)
         startCountdownLoop()
     }
 
-    private fun startMainLoop() {
+    /**
+     * Остановка главного таймера (по долгому тапу судьи)
+     * Требует пароль администратора (1234 или devdebug)
+     */
+    fun stopMainTimer(password: String): Boolean {
+        if (password != "1234" && password != "devdebug") {
+            return false
+        }
+
         mainJob?.cancel()
-        val startRef = System.currentTimeMillis() - _mainTimer.value
+        mainJob = null
+        _started.value = false
+        _mainTimer.value = 0L
+
+        CoroutineScope(Dispatchers.IO).launch {
+            settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "false"))
+            // ✅ ИСПРАВЛЕНО: используем delete вместо remove
+            settingsDao.delete(KEY_START_TIMESTAMP)
+        }
+
+        return true
+    }
+
+    private fun startMainLoop(keepStartRef: Boolean = false) {
+        mainJob?.cancel()
+        val startRef = if (keepStartRef) {
+            System.currentTimeMillis() - _mainTimer.value
+        } else {
+            System.currentTimeMillis()
+        }
         mainJob = scope.launch {
-            while (isActive) {
+            while (isActive && _started.value) {
                 _mainTimer.value = System.currentTimeMillis() - startRef
                 delay(100)
             }
@@ -107,12 +173,14 @@ class TimerManager @Inject constructor(
     private fun startCountdownLoop() {
         countdownJob?.cancel()
         countdownJob = scope.launch {
-            while (isActive && _countdown.value > 0) {
+            while (isActive && _countdown.value > 0 && _started.value) {
                 if (!_countdownPaused.value) {
                     delay(1000)
-                    _countdown.value -= 1
-                    // Сохраняем для восстановления после краша
-                    settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_VALUE, _countdown.value.toString()))
+                    if (_countdown.value > 0) {
+                        _countdown.value -= 1
+                        // Сохраняем для восстановления после краша
+                        settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_VALUE, _countdown.value.toString()))
+                    }
                 } else {
                     delay(100)
                 }
@@ -163,10 +231,11 @@ class TimerManager @Inject constructor(
         _isFirstStart.value = true
         CoroutineScope(Dispatchers.IO).launch {
             settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "false"))
-            settingsDao.remove(KEY_COUNTDOWN_VALUE)
-            settingsDao.remove(KEY_COUNTDOWN_PAUSED)
-            settingsDao.remove(KEY_FIRST_TEAM_STARTED)
-            settingsDao.remove(KEY_CURRENT_INTERVAL)
+            // ✅ ИСПРАВЛЕНО: используем delete вместо remove
+            settingsDao.delete(KEY_COUNTDOWN_VALUE)
+            settingsDao.delete(KEY_COUNTDOWN_PAUSED)
+            settingsDao.delete(KEY_FIRST_TEAM_STARTED)
+            settingsDao.delete(KEY_CURRENT_INTERVAL)
         }
     }
 }
@@ -2371,158 +2440,6 @@ class CompetitionSettingsVM @Inject constructor(
 
             competitionRepo.updateCompetition(competition.copy(settingsJson = json))
             _event.emit(SettingsUiEvent.ShowSnackbar("Настройки сохранены"))
-        }
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/finish/FinishScreen.kt>>>
-package com.speleo.start.presentation.screen.finish
-
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun FinishScreen(
-    onBack: () -> Unit,
-    vm: FinishVM = hiltViewModel()
-) {
-    val teams by vm.startedTeams.collectAsStateWithLifecycle()
-    val selectedIds by vm.selectedIds.collectAsStateWithLifecycle()
-
-    LaunchedEffect(Unit) { vm.loadStartedTeams() }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Финиш") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
-        ) {
-            Text("Выберите команды:", fontSize = 16.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (teams.isEmpty()) {
-                Text("Нет команд на дистанции", fontSize = 16.sp)
-            } else {
-                LazyColumn {
-                    items(teams, key = { it.id }) { team ->
-                        val isSelected = selectedIds.contains(team.id)
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp)
-                                .clickable { vm.toggleSelection(team.id) }
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp)) {
-                                Checkbox(checked = isSelected, onCheckedChange = null)
-                                Text("№${team.number} (${team.className}-й кл)", fontSize = 16.sp)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = { vm.confirmFinish() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = selectedIds.isNotEmpty()
-            ) {
-                Text("ПОДТВЕРДИТЬ ФИНИШ (${selectedIds.size})")
-            }
-        }
-    }
-}
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/screen/finish/FinishVM.kt>>>
-package com.speleo.start.presentation.screen.finish
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.speleo.start.data.local.PreferencesManager
-import com.speleo.start.data.repository.TeamRepository
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-data class FinishTeamInfo(
-    val id: Long,
-    val number: Int,
-    val className: String
-)
-
-@HiltViewModel
-class FinishVM @Inject constructor(
-    private val teamRepo: TeamRepository,
-    private val prefs: PreferencesManager
-) : ViewModel() {
-
-    private val _startedTeams = MutableStateFlow<List<FinishTeamInfo>>(emptyList())
-    val startedTeams: StateFlow<List<FinishTeamInfo>> = _startedTeams.asStateFlow()
-
-    private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
-    val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
-
-    fun loadStartedTeams() {
-        viewModelScope.launch {
-            val cid = prefs.activeCompetitionId
-            if (cid == -1L) return@launch
-            teamRepo.getStartedTeams(cid)
-                .map { list -> list.map { FinishTeamInfo(it.id, it.teamNumber, it.className) } }
-                .collect { _startedTeams.value = it }
-        }
-    }
-
-    fun toggleSelection(teamId: Long) {
-        _selectedIds.value = _selectedIds.value.let {
-            if (teamId in it) it - teamId else it + teamId
-        }
-    }
-
-    fun confirmFinish() {
-        viewModelScope.launch {
-            val timestamp = System.currentTimeMillis()
-            _selectedIds.value.forEach { id ->
-                teamRepo.setFinishTimestamp(id, timestamp)
-            }
-            _selectedIds.value = emptySet()
-            loadStartedTeams()
         }
     }
 }

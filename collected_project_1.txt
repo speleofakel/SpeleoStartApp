@@ -622,6 +622,9 @@ class MainActivity : ComponentActivity() {
                             HomeScreen(
                                 onNavigate = { screen ->
                                     navController.navigate(screen.route)
+                                },
+                                onNavigateToRouteCard = { teamId ->
+                                    navController.navigate(Screen.RouteCardDetail.pass(teamId))
                                 }
                             )
                         }
@@ -734,12 +737,17 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(
-                            route = Screen.RouteCardDetail.route,
-                            arguments = listOf(navArgument("teamId") { type = NavType.LongType })
+                            route = Screen.RouteCardDetail.route + "?masterMode={masterMode}",
+                            arguments = listOf(
+                                navArgument("teamId") { type = NavType.LongType },
+                                navArgument("masterMode") { type = NavType.BoolType; defaultValue = false }
+                            )
                         ) { backStackEntry ->
                             val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
+                            val masterMode = backStackEntry.arguments?.getBoolean("masterMode") ?: false
                             RouteCardScreen(
                                 teamId = teamId,
+                                masterMode = masterMode,
                                 onBack = { navController.popBackStack() }
                             )
                         }
@@ -757,7 +765,10 @@ class MainActivity : ComponentActivity() {
                             val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
                             TeamCardScreen(
                                 teamId = teamId,
-                                onBack = { navController.popBackStack() }
+                                onBack = { navController.popBackStack() },
+                                onNavigateToRouteCard = { tid ->
+                                    navController.navigate(Screen.RouteCardDetail.pass(tid))
+                                }
                             )
                         }
                     }
@@ -960,7 +971,6 @@ class TestDataGenerator @Inject constructor(
 
                         val a = (t * 2) % personIds.size
                         val b = (t * 2 + 1) % personIds.size
-                        // ИСПРАВЛЕНО: statusMember -> status
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
                         if (t % 2 == 1 && t * 2 + 2 < personIds.size) {
@@ -990,7 +1000,6 @@ class TestDataGenerator @Inject constructor(
 
                         val a = (t * 2 + 10) % personIds.size
                         val b = (t * 2 + 11) % personIds.size
-                        // ИСПРАВЛЕНО: statusMember -> status
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
                         participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
                     }
@@ -1007,9 +1016,9 @@ class TestDataGenerator @Inject constructor(
     suspend fun clearAll() {
         withContext(Dispatchers.IO) {
             try {
-                // Очищаем настройки таймера
-                appSettingsDao.remove("competition_start_timestamp")
-                appSettingsDao.remove("competition_active")
+                // ✅ ИСПРАВЛЕНО: remove → delete
+                appSettingsDao.delete("competition_start_timestamp")
+                appSettingsDao.delete("competition_active")
 
                 // Удаляем в правильном порядке (дети → родители)
                 participantDao.deleteAll()
@@ -1250,14 +1259,40 @@ import com.speleo.start.data.local.entity.AppSettingsEntity
 @Dao
 interface AppSettingsDao {
 
+    /**
+     * Получить значение настройки по ключу
+     * @param key Ключ настройки
+     * @return Значение или null, если не найдено
+     */
     @Query("SELECT value FROM app_settings WHERE `key` = :key")
     suspend fun get(key: String): String?
 
+    /**
+     * Сохранить или обновить настройку
+     * @param entity Сущность с ключом и значением
+     */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun put(entry: AppSettingsEntity)
+    suspend fun put(entity: AppSettingsEntity)
 
+    /**
+     * Удалить настройку по ключу
+     * @param key Ключ настройки для удаления
+     */
     @Query("DELETE FROM app_settings WHERE `key` = :key")
-    suspend fun remove(key: String)
+    suspend fun delete(key: String)  // ✅ МЕТОД ЕСТЬ
+
+    /**
+     * Получить все настройки (для отладки)
+     * @return Список всех настроек
+     */
+    @Query("SELECT * FROM app_settings")
+    suspend fun getAll(): List<AppSettingsEntity>
+
+    /**
+     * Очистить все настройки (для сброса приложения)
+     */
+    @Query("DELETE FROM app_settings")
+    suspend fun clearAll()
 }
 <<<конец файла
 
@@ -2760,40 +2795,5 @@ class UpdateTeamStatusUseCase @Inject constructor(
     suspend operator fun invoke(teamId: Long, status: String) =
         repository.updateTeamStatus(teamId, status)
 }
-<<<конец файла
-
-app/src/main/java/com/speleo/start/presentation/Navigation.kt>>>
-package com.speleo.start.presentation
-
-sealed class Screen(val route: String) {
-    object Home : Screen("home")
-    object Competitions : Screen("competitions")
-    object RouteCardDetail : Screen("route_card_detail/{teamId}") {
-        fun pass(id: Long) = "route_card_detail/$id"
-    }
-    object PersonDetail : Screen("person_detail/{personId}") {
-        fun createRoute(personId: Long) = "person_detail/$personId"
-    }
-    object Start : Screen("start")
-    object Finish : Screen("finish")
-    object Register : Screen("register")
-    object TeamList : Screen("team_list")
-    object Persons : Screen("persons")
-    object Results : Screen("results")
-    object Settings : Screen("settings")
-    object RouteCard : Screen("route_card")
-    object CreateCompetition : Screen("create_competition")
-    object Checkpoints : Screen("checkpoints/{competitionId}") {
-        fun pass(id: Long) = "checkpoints/$id"
-    }
-    object PersonNew : Screen("person_new")
-    object CompetitionSettings : Screen("competition_settings/{competitionId}") {
-        fun pass(id: Long) = "competition_settings/$id"
-    }
-    object TeamCard : Screen("team_card/{teamId}") {
-        fun pass(id: Long) = "team_card/$id"
-    }
-}
-
 <<<конец файла
 

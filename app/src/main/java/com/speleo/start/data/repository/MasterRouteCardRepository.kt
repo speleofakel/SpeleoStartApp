@@ -3,6 +3,7 @@ package com.speleo.start.data.repository
 import com.speleo.start.data.local.dao.MasterRouteCardDao
 import com.speleo.start.data.local.entity.MasterRouteCardEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,4 +58,8 @@ class MasterRouteCardRepository @Inject constructor(
 
     suspend fun deleteAllForCompetition(competitionId: Long) =
         masterRouteCardDao.deleteAllForCompetition(competitionId)
+
+
+    suspend fun getRouteCardByCompetitionFirst(competitionId: Long): List<MasterRouteCardEntity> =
+        masterRouteCardDao.getRouteCardByCompetition(competitionId).first()
 }

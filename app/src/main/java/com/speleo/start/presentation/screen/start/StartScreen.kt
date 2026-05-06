@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -25,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,7 +34,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -64,6 +68,11 @@ fun StartScreen(
     val validationError by vm.validationError.collectAsStateWithLifecycle()
     val startInterval by vm.startInterval.collectAsStateWithLifecycle()
     val navigateToTeamCard by vm.navigateToTeamCard.collectAsStateWithLifecycle()
+
+    // ✅ ДОБАВЛЕНО: состояние для диалога остановки таймера
+    var showStopTimerDialog by remember { mutableStateOf(false) }
+    var stopTimerPassword by remember { mutableStateOf("") }
+    var stopTimerError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { vm.loadQueue() }
     LaunchedEffect(queue) { vm.clearValidationError() }
@@ -114,8 +123,11 @@ fun StartScreen(
                     .padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ===== ГЛАВНЫЙ ТАЙМЕР (непаузится) =====
-                TimerDisplay(mainTimer)
+                // ===== ГЛАВНЫЙ ТАЙМЕР (с обработкой долгого тапа) =====
+                TimerDisplay(
+                    mainTimer,
+                    onLongPress = { showStopTimerDialog = true }
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -264,11 +276,75 @@ fun StartScreen(
             }
         }
     }
+
+    // ✅ ДОБАВЛЕНО: Диалог остановки главного таймера
+    if (showStopTimerDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showStopTimerDialog = false
+                stopTimerPassword = ""
+                stopTimerError = null
+            },
+            title = { Text("Остановка главного таймера") },
+            text = {
+                Column {
+                    Text("Вы действительно хотите остановить главный таймер?")
+                    Text("Это действие требует пароля судьи.", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = stopTimerPassword,
+                        onValueChange = {
+                            stopTimerPassword = it
+                            stopTimerError = null
+                        },
+                        label = { Text("Пароль") },
+                        singleLine = true,
+                        isError = stopTimerError != null,
+                        supportingText = {
+                            if (stopTimerError != null) {
+                                Text(stopTimerError!!, fontSize = 10.sp, color = Color.Red)
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (vm.timer.stopMainTimer(stopTimerPassword)) {
+                            showStopTimerDialog = false
+                            stopTimerPassword = ""
+                            stopTimerError = null
+                        } else {
+                            stopTimerError = "Неверный пароль"
+                            stopTimerPassword = ""
+                        }
+                    },
+                    enabled = stopTimerPassword.isNotBlank()
+                ) {
+                    Text("ОСТАНОВИТЬ ТАЙМЕР")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showStopTimerDialog = false
+                    stopTimerPassword = ""
+                    stopTimerError = null
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TimerDisplay(millis: Long, modifier: Modifier = Modifier) {
+fun TimerDisplay(
+    millis: Long,
+    modifier: Modifier = Modifier,
+    onLongPress: () -> Unit = {}  // ✅ ДОБАВЛЕНО
+) {
     val totalSec = millis / 1000
     val hours = totalSec / 3600
     val minutes = (totalSec % 3600) / 60
@@ -287,7 +363,7 @@ fun TimerDisplay(millis: Long, modifier: Modifier = Modifier) {
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = { },
-                onLongClick = { /* handled by parent */ }
+                onLongClick = onLongPress  // ✅ ИСПРАВЛЕНО
             ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant

@@ -15,7 +15,8 @@ import javax.inject.Inject
 data class FinishTeamInfo(
     val id: Long,
     val number: Int,
-    val className: String
+    val className: String,
+    val hasFinished: Boolean = false  // ✅ ДОБАВЛЕНО
 )
 
 @HiltViewModel
@@ -38,7 +39,16 @@ class FinishVM @Inject constructor(
             val cid = prefs.activeCompetitionId
             if (cid == -1L) return@launch
             teamRepo.getStartedTeams(cid)
-                .map { list -> list.map { FinishTeamInfo(it.id, it.teamNumber, it.className) } }
+                .map { list ->
+                    list.map {
+                        FinishTeamInfo(
+                            id = it.id,
+                            number = it.teamNumber,
+                            className = it.className,
+                            hasFinished = false  // started teams ещё не финишировали
+                        )
+                    }
+                }
                 .collect { _startedTeams.value = it }
         }
     }
