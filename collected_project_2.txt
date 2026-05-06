@@ -30,7 +30,6 @@ sealed class Screen(val route: String) {
         fun pass(id: Long) = "team_card/$id"
     }
 }
-
 <<<конец файла
 
 app/src/main/java/com/speleo/start/presentation/TimerManager.kt>>>

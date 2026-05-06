@@ -279,7 +279,6 @@ class TeamCardVM @Inject constructor(
             val team = teamRepo.getTeamById(teamId) ?: return@launch
 
             for (entry in entries) {
-                // ✅ ИСПРАВЛЕНО: getEntry возвращает TeamRouteCardEntity?, не Flow
                 val existing = teamRouteCardRepo.getEntry(teamId, entry.checkpointId)
                 val teamRouteCard = TeamRouteCardEntity(
                     teamId = teamId,

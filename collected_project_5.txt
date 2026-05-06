@@ -1053,7 +1053,7 @@ fun TeamCardScreen(
     teamId: Long,
     onBack: () -> Unit,
     onNavigateToFinish: (() -> Unit)? = null,
-    onNavigateToRouteCard: ((Long) -> Unit)? = null,
+    onNavigateToRouteCard: ((Long) -> Unit)? = null, // ← один параметр
     vm: TeamCardVM = hiltViewModel()
 ) {
     val card by vm.teamCard.collectAsStateWithLifecycle()
@@ -1573,8 +1573,7 @@ fun TeamCardScreen(
                 Button(
                     onClick = {
                         if (vm.masterUnlockRouteCard(teamId, masterPassword)) {
-                            // Переход с флагом masterMode = true
-                            onNavigateToRouteCard?.invoke(teamId, true)  // ← нужно изменить сигнатуру
+                            onNavigateToRouteCard?.invoke(teamId)
                             showMasterUnlockDialog = false
                             masterPassword = ""
                         } else {

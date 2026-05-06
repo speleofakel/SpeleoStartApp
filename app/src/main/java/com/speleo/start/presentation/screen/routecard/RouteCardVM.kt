@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 data class RouteCardEntry(
@@ -155,6 +156,8 @@ class RouteCardVM @Inject constructor(
 
     private fun saveEntry(entry: RouteCardEntry) {
         viewModelScope.launch {
+            Timber.d("saveEntry called: checkpointId=${entry.checkpointId}, taken=${entry.taken}")
+
             val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
             val teamRouteCard = TeamRouteCardEntity(
                 teamId = teamId,
@@ -166,15 +169,30 @@ class RouteCardVM @Inject constructor(
                 judgeConfirmed = false,
                 secretaryConfirmed = false
             )
-            routeCardRepo.saveEntry(teamRouteCard)
+
+            try {
+                routeCardRepo.saveEntry(teamRouteCard)
+                Timber.d("saveEntry success for checkpoint ${entry.checkpointId}")
+            } catch (e: Exception) {
+                Timber.e(e, "saveEntry failed for checkpoint ${entry.checkpointId}")
+            }
         }
     }
 
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД — СОХРАНЯЕТ СТАТУСЫ И ОТПРАВЛЯЕТ СОБЫТИЕ
     fun saveMasterChangesAndClose(onSaved: () -> Unit) {
         viewModelScope.launch {
+            Timber.d("=== MASTER SAVE START ===")
+            Timber.d("teamId: $teamId")
+            Timber.d("entries count: ${_entries.value.size}")
+
             // Сохраняем все изменения, сохраняя старые подписи
             for (entry in _entries.value) {
+                Timber.d("Processing checkpoint: ${entry.checkpointId}, taken=${entry.taken}")
+
                 val existing = routeCardRepo.getEntry(teamId, entry.checkpointId)
+                Timber.d("Existing entry: $existing")
+
                 val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
 
                 val teamRouteCard = TeamRouteCardEntity(
@@ -187,16 +205,29 @@ class RouteCardVM @Inject constructor(
                     judgeConfirmed = existing?.judgeConfirmed ?: false,
                     secretaryConfirmed = existing?.secretaryConfirmed ?: false
                 )
-                routeCardRepo.saveEntry(teamRouteCard)
+
+                Timber.d("Saving: judgeConfirmed=${teamRouteCard.judgeConfirmed}, secretaryConfirmed=${teamRouteCard.secretaryConfirmed}")
+
+                try {
+                    routeCardRepo.saveEntry(teamRouteCard)
+                    Timber.d("Save successful for checkpoint ${entry.checkpointId}")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to save checkpoint ${entry.checkpointId}")
+                }
             }
 
-            // Блокируем команду обратно
+            // Блокируем команду обратно (checkpointsEntered = true)
             val team = teamRepo.getTeamById(teamId)
+            Timber.d("Team before update: checkpointsEntered=${team?.checkpointsEntered}")
+
             if (team != null) {
-                teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+                val updatedTeam = team.copy(checkpointsEntered = true)
+                teamRepo.updateTeam(updatedTeam)
+                Timber.d("Team updated: checkpointsEntered=true")
             }
 
             _event.emit("✅ Изменения сохранены")
+            Timber.d("=== MASTER SAVE END ===")
             onSaved()
         }
     }

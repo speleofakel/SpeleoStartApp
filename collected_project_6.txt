@@ -262,13 +262,17 @@ class TeamCardVM @Inject constructor(
     }
 
     fun masterUnlockRouteCard(teamId: Long, password: String): Boolean {
-        return if (password == "devdebug") {
-            // Не устанавливаем _isMasterMode, просто возвращаем true
-            // Навигация будет обработана в UI
-            true
-        } else {
-            false
+        if (password == "devdebug") {
+            viewModelScope.launch {
+                val team = teamRepo.getTeamById(teamId)
+                if (team != null) {
+                    teamRepo.updateTeam(team.copy(checkpointsEntered = false))
+                    _event.emit(TeamCardEvent.ShowMessage("🔓 Путевой лист разблокирован для мастер-правки"))
+                }
+            }
+            return true
         }
+        return false
     }
 
     fun masterSaveRouteCard(teamId: Long, entries: List<RouteCardSaveEntry>) {
@@ -276,7 +280,6 @@ class TeamCardVM @Inject constructor(
             val team = teamRepo.getTeamById(teamId) ?: return@launch
 
             for (entry in entries) {
-                // ✅ ИСПРАВЛЕНО: getEntry возвращает TeamRouteCardEntity?, не Flow
                 val existing = teamRouteCardRepo.getEntry(teamId, entry.checkpointId)
                 val teamRouteCard = TeamRouteCardEntity(
                     teamId = teamId,

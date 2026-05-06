@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -46,7 +47,6 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun RouteCardScreen(
     teamId: Long,
-    masterMode: Boolean = false,  // ← НОВЫЙ ПАРАМЕТР
     onBack: () -> Unit,
     vm: RouteCardVM = hiltViewModel()
 ) {
@@ -61,9 +61,7 @@ fun RouteCardScreen(
     var secretaryPassword by remember { mutableStateOf("") }
     var judgePassword by remember { mutableStateOf("") }
 
-    LaunchedEffect(teamId, masterMode) {
-        vm.loadRouteCard(teamId, masterMode)  // ← передаём masterMode
-    }
+    LaunchedEffect(teamId) { vm.loadRouteCard(teamId) }
 
     LaunchedEffect(Unit) {
         vm.event.collectLatest { message ->
@@ -75,7 +73,7 @@ fun RouteCardScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(if (masterMode) "Путевой лист (Мастер-правка)" else "Путевой лист") },
+                title = { Text("Путевой лист") },
                 navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
             )
         }
@@ -95,12 +93,11 @@ fun RouteCardScreen(
                     .padding(padding)
                     .padding(12.dp)
             ) {
-                // Информация о команде
                 if (teamInfo != null) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (masterMode) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.primaryContainer
+                            containerColor = if (!isReadOnly) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.primaryContainer
                         )
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -113,16 +110,16 @@ fun RouteCardScreen(
                                 text = "Статус: ${teamInfo!!.status}",
                                 fontSize = 14.sp
                             )
-                            if (masterMode) {
+                            if (!isReadOnly && teamInfo?.status == "finished") {
                                 Text(
-                                    text = "👑 МАСТЕР-РЕЖИМ: редактирование без потери подтверждений",
+                                    text = "🔓 РЕЖИМ МАСТЕР-ПРАВКИ",
                                     fontSize = 13.sp,
                                     color = Color(0xFFF57C00),
                                     fontWeight = FontWeight.Bold
                                 )
                             } else if (isReadOnly) {
                                 Text(
-                                    text = "✅ Путевой лист подтверждён (read-only)",
+                                    text = "✅ Путевой лист подтверждён",
                                     fontSize = 13.sp,
                                     color = Color(0xFF2E7D32),
                                     fontWeight = FontWeight.Bold
@@ -133,7 +130,6 @@ fun RouteCardScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Список КП (в мастер-режиме игнорируем isReadOnly)
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -141,7 +137,7 @@ fun RouteCardScreen(
                     itemsIndexed(entries) { index, entry ->
                         RouteCardEntryCard(
                             entry = entry,
-                            isReadOnly = if (masterMode) false else isReadOnly,  // ← мастер-режим разблокирует
+                            isReadOnly = isReadOnly,
                             onTakenChange = { vm.toggleTaken(index) },
                             onErrorChange = { vm.toggleError(index) },
                             onOffsetTimeChange = { vm.updateOffsetTime(index, it) },
@@ -149,11 +145,22 @@ fun RouteCardScreen(
                         )
                     }
 
-                    // Кнопки подтверждения (только если не read-only и не мастер-режим)
-                    if (!isReadOnly && !masterMode && entries.isNotEmpty()) {
+                    if (!isReadOnly && entries.isNotEmpty() && teamInfo?.status == "finished") {
                         item {
                             Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { vm.saveMasterChangesAndClose(onBack) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57C00))
+                            ) {
+                                Text("💾 СОХРАНИТЬ И ЗАКРЫТЬ", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
 
+                    if (isReadOnly && entries.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -162,30 +169,14 @@ fun RouteCardScreen(
                                     onClick = { showSecretaryDialog = true },
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("📝 Подтвердить секретарём", fontSize = 12.sp)
+                                    Text("📝 Секретарь", fontSize = 12.sp)
                                 }
                                 Button(
                                     onClick = { showJudgeDialog = true },
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("⚖️ Подтвердить судьёй", fontSize = 12.sp)
+                                    Text("⚖️ Судья", fontSize = 12.sp)
                                 }
-                            }
-                        }
-                    }
-
-                    // Кнопка сохранения для мастер-режима
-                    if (masterMode && entries.isNotEmpty()) {
-                        item {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = { vm.saveMasterChanges() },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFF57C00)
-                                )
-                            ) {
-                                Text("💾 СОХРАНИТЬ (Мастер-правка)", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -194,7 +185,6 @@ fun RouteCardScreen(
         }
     }
 
-    // Диалог подтверждения секретарём (без изменений)
     if (showSecretaryDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -204,7 +194,7 @@ fun RouteCardScreen(
             title = { Text("Подтверждение секретарём") },
             text = {
                 Column {
-                    Text("Введите пароль секретаря для подтверждения путевого листа.")
+                    Text("Введите пароль секретаря")
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = secretaryPassword,
@@ -220,24 +210,18 @@ fun RouteCardScreen(
                         vm.confirmBySecretary(secretaryPassword)
                         showSecretaryDialog = false
                         secretaryPassword = ""
-                    },
-                    enabled = secretaryPassword.isNotBlank()
-                ) {
-                    Text("ПОДТВЕРДИТЬ")
-                }
+                    }
+                ) { Text("ПОДТВЕРДИТЬ") }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showSecretaryDialog = false
                     secretaryPassword = ""
-                }) {
-                    Text("Отмена")
-                }
+                }) { Text("Отмена") }
             }
         )
     }
 
-    // Диалог подтверждения судьёй (без изменений)
     if (showJudgeDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -247,8 +231,7 @@ fun RouteCardScreen(
             title = { Text("Подтверждение судьёй") },
             text = {
                 Column {
-                    Text("Введите пароль судьи для финального подтверждения путевого листа.")
-                    Text("После подтверждения изменения будут невозможны.", fontSize = 12.sp, color = Color.Gray)
+                    Text("Введите пароль судьи")
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = judgePassword,
@@ -264,19 +247,14 @@ fun RouteCardScreen(
                         vm.confirmByJudge(judgePassword)
                         showJudgeDialog = false
                         judgePassword = ""
-                    },
-                    enabled = judgePassword.isNotBlank()
-                ) {
-                    Text("ПОДТВЕРДИТЬ")
-                }
+                    }
+                ) { Text("ПОДТВЕРДИТЬ") }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showJudgeDialog = false
                     judgePassword = ""
-                }) {
-                    Text("Отмена")
-                }
+                }) { Text("Отмена") }
             }
         )
     }
@@ -420,7 +398,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -466,16 +443,12 @@ class RouteCardVM @Inject constructor(
 
     private var teamId: Long = 0L
     private var competitionId: Long = 0L
-    private var isMasterMode = false
-    private var originalEntries: List<RouteCardEntry> = emptyList()
     private var collectionJob: kotlinx.coroutines.Job? = null
 
-    fun loadRouteCard(teamId: Long, masterMode: Boolean = false) {
+    fun loadRouteCard(teamId: Long) {
         this.teamId = teamId
-        this.isMasterMode = masterMode
         viewModelScope.launch {
             _isLoading.value = true
-            _isReadOnly.value = false  // временно снимаем блокировку для загрузки
 
             val team = teamRepo.getTeamById(teamId)
             if (team != null) {
@@ -486,10 +459,7 @@ class RouteCardVM @Inject constructor(
                     className = team.className,
                     status = team.status
                 )
-                // В мастер-режиме игнорируем checkpointsEntered
-                if (!masterMode) {
-                    _isReadOnly.value = team.checkpointsEntered
-                }
+                _isReadOnly.value = team.checkpointsEntered
             } else {
                 _isLoading.value = false
                 return@launch
@@ -516,9 +486,6 @@ class RouteCardVM @Inject constructor(
                     }
                 }.collect { list ->
                     _entries.value = list
-                    if (!masterMode) {
-                        originalEntries = list
-                    }
                     _isLoading.value = false
                 }
             }
@@ -533,7 +500,7 @@ class RouteCardVM @Inject constructor(
             takenWithError = if (!entry.taken) false else entry.takenWithError
         )
         _entries.value = current
-        if (!isMasterMode) {
+        if (!_isReadOnly.value) {
             saveEntry(current[index])
         }
     }
@@ -544,7 +511,7 @@ class RouteCardVM @Inject constructor(
         if (entry.taken) {
             current[index] = entry.copy(takenWithError = !entry.takenWithError)
             _entries.value = current
-            if (!isMasterMode) {
+            if (!_isReadOnly.value) {
                 saveEntry(current[index])
             }
         }
@@ -555,7 +522,7 @@ class RouteCardVM @Inject constructor(
         val entry = current[index]
         current[index] = entry.copy(offsetTime = offsetTime)
         _entries.value = current
-        if (!isMasterMode) {
+        if (!_isReadOnly.value) {
             saveEntry(current[index])
         }
     }
@@ -565,7 +532,7 @@ class RouteCardVM @Inject constructor(
         val entry = current[index]
         current[index] = entry.copy(penalty = penalty)
         _entries.value = current
-        if (!isMasterMode) {
+        if (!_isReadOnly.value) {
             saveEntry(current[index])
         }
     }
@@ -587,13 +554,10 @@ class RouteCardVM @Inject constructor(
         }
     }
 
-    /**
-     * Сохранение изменений в мастер-режиме с сохранением статусов подтверждения
-     */
-    fun saveMasterChanges() {
+    fun saveMasterChangesAndClose(onSaved: () -> Unit) {
         viewModelScope.launch {
-            val currentEntries = _entries.value
-            for (entry in currentEntries) {
+            // Сохраняем все изменения, сохраняя старые подписи
+            for (entry in _entries.value) {
                 val existing = routeCardRepo.getEntry(teamId, entry.checkpointId)
                 val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
 
@@ -604,66 +568,51 @@ class RouteCardVM @Inject constructor(
                     takenWithError = entry.takenWithError,
                     offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
                     penalty = entry.penalty.toIntOrNull() ?: 0,
-                    judgeConfirmed = existing?.judgeConfirmed ?: true,
-                    secretaryConfirmed = existing?.secretaryConfirmed ?: true
+                    judgeConfirmed = existing?.judgeConfirmed ?: false,
+                    secretaryConfirmed = existing?.secretaryConfirmed ?: false
                 )
                 routeCardRepo.saveEntry(teamRouteCard)
             }
 
+            // Блокируем команду обратно (checkpointsEntered = true)
             val team = teamRepo.getTeamById(teamId)
             if (team != null) {
                 teamRepo.updateTeam(team.copy(checkpointsEntered = true))
             }
 
-            _isReadOnly.value = true
-            _event.emit("✅ Путевой лист сохранён в мастер-режиме. Статусы подтверждения сохранены.")
-            isMasterMode = false
-
-            // Перезагружаем для обновления isReadOnly
-            loadRouteCard(teamId, false)
+            _event.emit("✅ Изменения сохранены")
+            onSaved()
         }
     }
 
     fun confirmBySecretary(password: String) {
         viewModelScope.launch {
-            if (isMasterMode) {
-                _event.emit("❌ В мастер-режиме подтверждение не требуется. Используйте «СОХРАНИТЬ».")
-                return@launch
-            }
             if (password == "secret123" || password == "devdebug") {
-                val currentEntries = _entries.value
-                for (entry in currentEntries) {
+                for (entry in _entries.value) {
                     routeCardRepo.confirmBySecretary(teamId, entry.checkpointId)
                 }
-                _event.emit("✅ Путевой лист подтверждён секретарём")
+                _event.emit("✅ Подтверждено секретарём")
             } else {
-                _event.emit("❌ Неверный пароль секретаря")
+                _event.emit("❌ Неверный пароль")
             }
         }
     }
 
     fun confirmByJudge(password: String) {
         viewModelScope.launch {
-            if (isMasterMode) {
-                _event.emit("❌ В мастер-режиме подтверждение не требуется. Используйте «СОХРАНИТЬ».")
-                return@launch
-            }
             if (password == "judge123" || password == "1234" || password == "devdebug") {
                 val timestamp = System.currentTimeMillis()
-                val currentEntries = _entries.value
-                for (entry in currentEntries) {
+                for (entry in _entries.value) {
                     routeCardRepo.confirmByJudge(teamId, entry.checkpointId, timestamp)
                 }
-
                 val team = teamRepo.getTeamById(teamId)
                 if (team != null) {
                     teamRepo.updateTeam(team.copy(checkpointsEntered = true))
                 }
-
                 _isReadOnly.value = true
-                _event.emit("✅ Путевой лист подтверждён судьёй. Данные закрыты для редактирования.")
+                _event.emit("✅ Подтверждено судьёй")
             } else {
-                _event.emit("❌ Неверный пароль судьи")
+                _event.emit("❌ Неверный пароль")
             }
         }
     }

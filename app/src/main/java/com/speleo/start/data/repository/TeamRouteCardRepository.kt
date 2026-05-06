@@ -4,6 +4,7 @@ import com.speleo.start.data.local.dao.TeamRouteCardDao
 import com.speleo.start.data.local.entity.TeamRouteCardEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,10 +23,15 @@ class TeamRouteCardRepository @Inject constructor(
         teamRouteCardDao.getPendingCount(teamId)
 
     suspend fun saveEntry(entry: TeamRouteCardEntity) {
+        Timber.d("saveEntry: teamId=${entry.teamId}, checkpointId=${entry.checkpointId}, taken=${entry.taken}")
         val existing = teamRouteCardDao.getEntry(entry.teamId, entry.checkpointId)
+        Timber.d("existing: $existing")
+
         if (existing != null) {
+            Timber.d("Updating existing entry")
             teamRouteCardDao.update(entry)
         } else {
+            Timber.d("Inserting new entry")
             teamRouteCardDao.insert(entry)
         }
     }
