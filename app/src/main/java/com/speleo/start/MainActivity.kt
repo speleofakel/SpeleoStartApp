@@ -197,10 +197,7 @@ class MainActivity : ComponentActivity() {
                             val teamId = backStackEntry.arguments?.getLong("teamId") ?: return@composable
                             TeamCardScreen(
                                 teamId = teamId,
-                                onBack = { navController.popBackStack() },
-                                onNavigateToRouteCard = { tid ->
-                                    navController.navigate(Screen.RouteCardDetail.pass(tid))
-                                }
+                                onBack = { navController.popBackStack() }
                             )
                         }
                     }

@@ -56,4 +56,5 @@ class TeamRouteCardRepository @Inject constructor(
 
     suspend fun getRouteCardByTeamFirst(teamId: Long): List<TeamRouteCardEntity> =
         teamRouteCardDao.getRouteCardByTeam(teamId).first()
+
 }

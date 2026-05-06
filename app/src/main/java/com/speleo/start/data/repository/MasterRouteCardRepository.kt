@@ -61,5 +61,5 @@ class MasterRouteCardRepository @Inject constructor(
 
 
     suspend fun getRouteCardByCompetitionFirst(competitionId: Long): List<MasterRouteCardEntity> =
-        masterRouteCardDao.getRouteCardByCompetition(competitionId).first()
+        getRouteCardByCompetition(competitionId).first()
 }

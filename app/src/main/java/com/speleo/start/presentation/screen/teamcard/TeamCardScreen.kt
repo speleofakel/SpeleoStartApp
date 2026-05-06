@@ -1,38 +1,23 @@
 package com.speleo.start.presentation.screen.teamcard
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -47,10 +32,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -59,73 +40,56 @@ import com.speleo.start.presentation.component.PersonSearchDialog
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamCardScreen(
     teamId: Long,
     onBack: () -> Unit,
-    onNavigateToFinish: (() -> Unit)? = null,
-    onNavigateToRouteCard: ((Long) -> Unit)? = null, // ← один параметр
     vm: TeamCardVM = hiltViewModel()
 ) {
-    val card by vm.teamCard.collectAsStateWithLifecycle()
-    val checkpoints by vm.checkpoints.collectAsStateWithLifecycle()
-    val startTimeRelative by vm.startTimeRelative.collectAsStateWithLifecycle()
-    val finishTimeRelative by vm.finishTimeRelative.collectAsStateWithLifecycle()
-    val takenCount by vm.takenCount.collectAsStateWithLifecycle()
-    val totalCheckpoints by vm.totalCheckpointsCount.collectAsStateWithLifecycle()
-    val isMasterMode by vm.isMasterMode.collectAsStateWithLifecycle()
+    val uiState by vm.uiState.collectAsStateWithLifecycle()
+    val relativeTimes = vm.getRelativeTimes()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var showMenu by remember { mutableStateOf(false) }
+    var showReplaceDialog by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    var showMentorDialog by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var showDisbandDialog by remember { mutableStateOf(false) }
-    var showReplaceDialog by remember { mutableStateOf(false) }
-    var showMentorDialog by remember { mutableStateOf(false) }
-    var showReplacedHistory by remember { mutableStateOf(false) }
-    var showMasterUnlockDialog by remember { mutableStateOf(false) }
-    var showFinishTimeDialog by remember { mutableStateOf(false) }
-    var selectedParticipantId by remember { mutableStateOf<Long?>(null) }
-    var selectedParticipantName by remember { mutableStateOf("") }
-    var selectedParticipantForMentor by remember { mutableStateOf<TeamCardMember?>(null) }
     var disbandReason by remember { mutableStateOf("") }
-    var disbandPassword by remember { mutableStateOf("") }
+    var showMasterPasswordDialog by remember { mutableStateOf(false) }
     var masterPassword by remember { mutableStateOf("") }
-
-    var adjustedHours by remember { mutableStateOf("") }
-    var adjustedMinutes by remember { mutableStateOf("") }
-    var adjustedSeconds by remember { mutableStateOf("") }
+    var showFinishTimeDialog by remember { mutableStateOf(false) }
+    var finishTimeHours by remember { mutableStateOf("") }
+    var finishTimeMinutes by remember { mutableStateOf("") }
+    var finishTimeSeconds by remember { mutableStateOf("") }
+    var replacedHistoryExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(teamId) {
-        vm.loadTeam(teamId)
-        vm.loadCheckpoints(teamId)
+        vm.loadData(teamId)
     }
 
     LaunchedEffect(Unit) {
         vm.event.collectLatest { event ->
             when (event) {
-                is TeamCardEvent.ShowMessage -> {
-                    snackbarHostState.showSnackbar(
-                        message = event.message,
-                        duration = SnackbarDuration.Short
-                    )
+                is TeamCardUiEvent.ShowMessage -> {
+                    snackbarHostState.showSnackbar(event.message)
                 }
-                is TeamCardEvent.ShowPasswordDialog -> { }
-                is TeamCardEvent.ShowReplaceDialog -> {
-                    selectedParticipantId = event.participantId
-                    selectedParticipantName = event.currentPersonName
-                    showReplaceDialog = true
+                is TeamCardUiEvent.ShowMasterPasswordDialog -> {
+                    showMasterPasswordDialog = true
                 }
-                is TeamCardEvent.TeamUpdated -> {
-                    vm.loadTeam(event.teamId)
-                    vm.loadCheckpoints(event.teamId)
+                is TeamCardUiEvent.ShowFinishTimeDialog -> {
+                    val seconds = event.currentSeconds
+                    finishTimeHours = (seconds / 3600).toString()
+                    finishTimeMinutes = ((seconds % 3600) / 60).toString()
+                    finishTimeSeconds = (seconds % 60).toString()
+                    showFinishTimeDialog = true
+                }
+                TeamCardUiEvent.NavigateBack -> {
+                    onBack()
                 }
             }
         }
     }
-
-    val fabAction = vm.getFabAction()
-    val canEdit = vm.canEdit()
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -133,319 +97,235 @@ fun TeamCardScreen(
             TopAppBar(
                 title = { Text("Карточка команды") },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("← Назад") }
-                },
-                actions = {
-                    if (canEdit) {
-                        IconButton(onClick = { showMenu = true }) {
-                            Text("⋮", fontSize = 24.sp)
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("🚫 Расформировать команду") },
-                                onClick = {
-                                    showMenu = false
-                                    showDisbandDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🔄 Сменить класс") },
-                                onClick = {
-                                    showMenu = false
-                                    vm.changeClass("", null)
-                                },
-                                enabled = card?.status == "registered"
-                            )
-                        }
+                    TextButton(onClick = onBack) {
+                        Text("← Назад")
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            if (fabAction != null) {
-                FloatingActionButton(
-                    onClick = {
-                        when (fabAction) {
-                            "finish" -> onNavigateToFinish?.invoke()
-                            "route" -> onNavigateToRouteCard?.invoke(teamId)
-                        }
-                    },
-                    containerColor = when (fabAction) {
-                        "finish" -> Color(0xFFD32F2F)
-                        "route" -> Color(0xFF2E7D32)
-                        else -> Color.Gray
-                    }
-                ) {
-                    Text(if (fabAction == "finish") "🏁" else "📄", fontSize = 20.sp)
-                }
-            }
         }
     ) { padding ->
-        if (card == null) {
+        if (uiState.isLoading) {
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "Загрузка...", fontSize = 18.sp)
+                CircularProgressIndicator()
+            }
+        } else if (uiState.teamInfo == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Команда не найдена", fontSize = 18.sp)
             }
         } else {
-            val info = card!!
+            val teamInfo = uiState.teamInfo!!
+            val canEdit = teamInfo.status == "registered" || teamInfo.status == "started"
+            val isMasterMode = uiState.mode == TeamCardMode.MASTER_EDIT
+            val isEditMode = uiState.mode == TeamCardMode.EDIT
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // ===== ОСНОВНАЯ ИНФОРМАЦИЯ =====
+                // Основная информация
                 item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "№${info.number} · ${info.className}-й класс",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 20.sp
-                                )
-                                Text(
-                                    text = vm.getColorMarkText(),
-                                    fontSize = 14.sp,
-                                    color = Color(0xFFF57C00)
-                                )
+                    TeamHeaderCard(teamInfo = teamInfo)
+                }
+
+                // Времена
+                item {
+                    TimesCard(
+                        startTime = relativeTimes.startTime,
+                        finishTime = relativeTimes.finishTime,
+                        status = teamInfo.status,
+                        onFinishTimeLongClick = {
+                            if (teamInfo.status == "finished") {
+                                vm.showFinishTimeDialog()
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "Статус: ${statusToText(info.status)}", fontSize = 14.sp)
+                        }
+                    )
+                }
+
+                // Статус путевого листа
+                item {
+                    RouteCardStatusCard(
+                        stats = uiState.routeCardStats,
+                        checkpointsEntered = teamInfo.checkpointsEntered,
+                        status = teamInfo.status,
+                        isMasterMode = isMasterMode,
+                        onMasterUnlock = { showMasterPasswordDialog = true },
+                        onFillRouteCard = { vm.enterEditMode() },
+                        onSecretarySign = { vm.signAsSecretary() },
+                        onJudgeSign = { vm.signAsJudge() },
+                        mode = uiState.mode
+                    )
+                }
+
+                // Кластеры КП (в режиме просмотра)
+                if (uiState.mode == TeamCardMode.VIEW && uiState.routeCardEntries.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "🗺️ КОНТРОЛЬНЫЕ ПУНКТЫ",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                    item {
+                        CheckpointsClusterGrid(
+                            entries = uiState.routeCardEntries,
+                            onCheckpointClick = null
+                        )
+                    }
+                }
+
+                // Редактирование ПЛ (в режиме EDIT или MASTER_EDIT)
+                if (isEditMode || isMasterMode) {
+                    item {
+                        Text(
+                            text = if (isMasterMode) "👑 РЕДАКТИРОВАНИЕ (Мастер-режим)" else "📝 РЕДАКТИРОВАНИЕ ПУТЕВОГО ЛИСТА",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                    item {
+                        EditableCheckpointList(
+                            entries = uiState.routeCardEntries,
+                            onTakenChange = { id, taken -> vm.updateCheckpointTaken(id, taken) },
+                            onErrorChange = { id, error -> vm.updateCheckpointError(id, error) },
+                            onOffsetTimeChange = { id, time -> vm.updateCheckpointOffsetTime(id, time) },
+                            onPenaltyChange = { id, penalty -> vm.updateCheckpointPenalty(id, penalty) },
+                            isEditable = true
+                        )
+                    }
+                    if (isMasterMode) {
+                        item {
+                            Button(
+                                onClick = { vm.saveMasterChanges() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("💾 СОХРАНИТЬ И ЗАКРЫТЬ")
+                            }
+                        }
+                    }
+                    if (isEditMode) {
+                        item {
+                            Button(
+                                onClick = { vm.cancelEdit() },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.secondary
+                                )
+                            ) {
+                                Text("Отмена")
+                            }
                         }
                     }
                 }
 
-                // ===== СТАТУС ПУТЕВОГО ЛИСТА =====
-                item {
-                    RouteCardStatusCard(
-                        checkpointsEntered = info.checkpointsEntered,
-                        teamStatus = info.status,
-                        takenCount = takenCount,
-                        totalCount = totalCheckpoints,
-                        isMasterMode = isMasterMode,
-                        onMasterUnlock = { showMasterUnlockDialog = true },
-                        onFillRouteCard = { onNavigateToRouteCard?.invoke(teamId) }
-                    )
-                }
-
-                // ===== ВРЕМЕНА =====
-                item {
-                    TimeStatsCard(
-                        status = info.status,
-                        startTime = startTimeRelative,
-                        finishTime = finishTimeRelative,
-                        onFinishTimeClick = {
-                            if (info.status == "finished") {
-                                showFinishTimeDialog = true
-                            }
-                        }
-                    )
-                }
-
-                // ===== КЛАСТЕРЫ КП =====
+                // Состав команды
                 item {
                     Text(
-                        text = "🗺️ КОНТРОЛЬНЫЕ ПУНКТЫ",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-
-                item {
-                    CheckpointsGrid(
-                        checkpoints = checkpoints,
-                        onCheckpointClick = { checkpoint ->
-                            if (info.status == "finished" && !info.checkpointsEntered) {
-                                onNavigateToRouteCard?.invoke(teamId)
-                            }
-                        }
-                    )
-                }
-
-                // ===== СОСТАВ КОМАНДЫ =====
-                item {
-                    Text(
-                        text = "👥 Состав (${info.members.size})",
-                        fontWeight = FontWeight.Bold,
+                        text = "👥 Состав (${uiState.members.size})",
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                         fontSize = 16.sp,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
 
-                items(info.members) { member ->
-                    TeamMemberCard(
+                items(uiState.members) { member ->
+                    MemberCard(
                         member = member,
                         isCaptain = member.role == "captain",
-                        canEdit = canEdit,
+                        canEdit = canEdit && !isEditMode && !isMasterMode,
                         onReplace = {
-                            selectedParticipantId = member.participantId
-                            selectedParticipantName = "${member.lastName} ${member.firstName}"
-                            showReplaceDialog = true
+                            showReplaceDialog = Pair(member.participantId, "${member.lastName} ${member.firstName}")
                         },
-                        onRemove = {
-                            vm.removeMember(member.participantId)
-                        },
+                        onRemove = { vm.removeMember(member.participantId) },
                         onAssignMentor = {
-                            selectedParticipantForMentor = member
-                            showMentorDialog = true
+                            showMentorDialog = Pair(member.participantId, "${member.lastName} ${member.firstName}")
                         }
                     )
                 }
 
-                // ===== ИСТОРИЯ ЗАМЕН =====
-                if (info.replacedCount > 0) {
+                // История замен
+                if (uiState.replacedHistory.isNotEmpty()) {
                     item {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showReplacedHistory = !showReplacedHistory },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "🔄 История замен (${info.replacedCount})",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                text = if (showReplacedHistory) "▲" else "▼",
-                                fontSize = 12.sp,
-                                color = Color.Gray
-                            )
-                        }
+                        ReplacedHistorySection(
+                            replacedMembers = uiState.replacedHistory,
+                            isExpanded = replacedHistoryExpanded,
+                            onToggle = { replacedHistoryExpanded = !replacedHistoryExpanded }
+                        )
+                    }
+                }
 
-                        if (showReplacedHistory) {
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    if (info.replacedMembers.isNotEmpty()) {
-                                        info.replacedMembers.forEach { replaced ->
-                                            Text(
-                                                text = replaced,
-                                                fontSize = 13.sp,
-                                                modifier = Modifier.padding(vertical = 2.dp)
-                                            )
-                                        }
-                                    } else {
-                                        Text(
-                                            text = "Нет записей",
-                                            fontSize = 12.sp,
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-                            }
+                // Кнопка расформирования (только если canEdit)
+                if (canEdit && !isEditMode && !isMasterMode) {
+                    item {
+                        Button(
+                            onClick = { showDisbandDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("🚫 РАСФОРМИРОВАТЬ КОМАНДУ")
                         }
                     }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(32.dp))
                 }
             }
         }
     }
 
-    // Диалог корректировки времени финиша
-    if (showFinishTimeDialog && card != null) {
-        AlertDialog(
-            onDismissRequest = {
-                showFinishTimeDialog = false
-                adjustedHours = ""
-                adjustedMinutes = ""
-                adjustedSeconds = ""
+    // Диалог замены участника
+    if (showReplaceDialog != null) {
+        val (participantId, participantName) = showReplaceDialog!!
+        PersonSearchDialog(
+            title = "Заменить: $participantName",
+            onPersonSelected = { person ->
+                vm.replaceMember(participantId, person.id)
+                showReplaceDialog = null
             },
-            title = { Text("Корректировка времени финиша") },
-            text = {
-                Column {
-                    Text("Команда №${card!!.number}", fontSize = 14.sp)
-                    Text("Текущее время финиша: $finishTimeRelative", fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
+            onQuickCreate = { fullName ->
+                vm.createQuickPerson(fullName) { newPersonId ->
+                    vm.replaceMember(participantId, newPersonId)
+                    showReplaceDialog = null
+                }
+            },
+            onDismiss = { showReplaceDialog = null },
+            filterForMentors = false
+        )
+    }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = adjustedHours,
-                            onValueChange = {
-                                if (it.length <= 2 && it.all { c -> c.isDigit() })
-                                    adjustedHours = it
-                            },
-                            label = { Text("Часы") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = adjustedMinutes,
-                            onValueChange = {
-                                if (it.length <= 2 && it.all { c -> c.isDigit() })
-                                    adjustedMinutes = it
-                            },
-                            label = { Text("Минуты") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = adjustedSeconds,
-                            onValueChange = {
-                                if (it.length <= 2 && it.all { c -> c.isDigit() })
-                                    adjustedSeconds = it
-                            },
-                            label = { Text("Секунды") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                    }
-                    Text(
-                        "Введите относительное время от старта (ЧЧ:ММ:СС)",
-                        fontSize = 10.sp,
-                        color = Color.Gray
-                    )
+    // Диалог выбора ментора
+    if (showMentorDialog != null) {
+        val (participantId, participantName) = showMentorDialog!!
+        PersonSearchDialog(
+            title = "Выбрать ментора для $participantName",
+            onPersonSelected = { person ->
+                vm.assignMentor(participantId, person.id)
+                showMentorDialog = null
+            },
+            onQuickCreate = { fullName ->
+                vm.createQuickPerson(fullName) { newPersonId ->
+                    vm.assignMentor(participantId, newPersonId)
+                    showMentorDialog = null
                 }
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val hours = adjustedHours.toIntOrNull() ?: 0
-                        val minutes = adjustedMinutes.toIntOrNull() ?: 0
-                        val seconds = adjustedSeconds.toIntOrNull() ?: 0
-                        val totalSeconds = hours * 3600 + minutes * 60 + seconds
-
-                        if (totalSeconds > 0) {
-                            vm.adjustFinishTimeRelative(totalSeconds)
-                        }
-                        showFinishTimeDialog = false
-                        adjustedHours = ""
-                        adjustedMinutes = ""
-                        adjustedSeconds = ""
-                    },
-                    enabled = adjustedHours.isNotBlank() || adjustedMinutes.isNotBlank() || adjustedSeconds.isNotBlank()
-                ) {
-                    Text("СОХРАНИТЬ")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showFinishTimeDialog = false
-                    adjustedHours = ""
-                    adjustedMinutes = ""
-                    adjustedSeconds = ""
-                }) {
-                    Text("Отмена")
-                }
-            }
+            onDismiss = { showMentorDialog = null },
+            filterForMentors = true
         )
     }
 
@@ -453,29 +333,25 @@ fun TeamCardScreen(
     if (showDisbandDialog) {
         AlertDialog(
             onDismissRequest = { showDisbandDialog = false },
-            title = { Text(text = "🚫 Расформировать команду") },
+            title = { Text("Расформировать команду") },
             text = {
                 Column {
-                    Text(
-                        text = "Команда №${card?.number} будет расформирована. Участники станут свободными агентами.",
-                        fontSize = 14.sp
-                    )
+                    Text("Команда №${uiState.teamInfo?.number} будет расформирована.")
+                    Text("Участники станут свободными агентами.", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = disbandReason,
                         onValueChange = { disbandReason = it },
-                        label = { Text(text = "Причина (необязательно)") },
+                        label = { Text("Причина (необязательно)") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
-                    if (card?.status == "started") {
+                    if (uiState.teamInfo?.status == "started") {
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = disbandPassword,
-                            onValueChange = { disbandPassword = it },
-                            label = { Text(text = "Пароль судьи") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                        Text(
+                            text = "⚠️ Для расформирования команды на дистанции требуется пароль мастера",
+                            fontSize = 11.sp,
+                            color = androidx.compose.ui.graphics.Color.Red
                         )
                     }
                 }
@@ -483,95 +359,37 @@ fun TeamCardScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        vm.disbandTeam(disbandPassword, disbandReason)
+                        vm.disbandTeam(disbandReason)
                         showDisbandDialog = false
                         disbandReason = ""
-                        disbandPassword = ""
-                    },
-                    enabled = card?.status != "started" || disbandPassword.isNotBlank()
+                    }
                 ) {
-                    Text(text = "РАСФОРМИРОВАТЬ")
+                    Text("РАСФОРМИРОВАТЬ")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDisbandDialog = false }) {
-                    Text(text = "Отмена")
+                TextButton(onClick = {
+                    showDisbandDialog = false
+                    disbandReason = ""
+                }) {
+                    Text("Отмена")
                 }
             }
         )
     }
 
-    // Диалог замены участника
-    if (showReplaceDialog && selectedParticipantId != null) {
-        PersonSearchDialog(
-            title = "Заменить: $selectedParticipantName",
-            onPersonSelected = { person ->
-                vm.replaceMember(selectedParticipantId!!, person.id)
-                showReplaceDialog = false
-                selectedParticipantId = null
-                selectedParticipantName = ""
-            },
-            onQuickCreate = { fullName ->
-                vm.createQuickPerson(fullName) { newPerson ->
-                    vm.replaceMember(selectedParticipantId!!, newPerson.id)
-                    showReplaceDialog = false
-                    selectedParticipantId = null
-                    selectedParticipantName = ""
-                }
-            },
-            onDismiss = {
-                showReplaceDialog = false
-                selectedParticipantId = null
-                selectedParticipantName = ""
-            }
-        )
-    }
-
-    // Диалог выбора ментора
-    if (showMentorDialog && selectedParticipantForMentor != null) {
-        val participantId = selectedParticipantForMentor!!.participantId
-        val participantName = "${selectedParticipantForMentor!!.lastName} ${selectedParticipantForMentor!!.firstName}"
-
-        PersonSearchDialog(
-            title = "Выбрать ментора для $participantName",
-            onPersonSelected = { person ->
-                vm.assignMentor(participantId, person.id)
-                showMentorDialog = false
-                selectedParticipantForMentor = null
-            },
-            onQuickCreate = { fullName ->
-                vm.createQuickPerson(fullName) { newPerson ->
-                    vm.assignMentor(participantId, newPerson.id)
-                    showMentorDialog = false
-                    selectedParticipantForMentor = null
-                }
-            },
-            filterForMentors = true,
-            onDismiss = {
-                showMentorDialog = false
-                selectedParticipantForMentor = null
-            }
-        )
-    }
-
-    // ===== ДИАЛОГ МАСТЕР-РАЗБЛОКИРОВКИ =====
-    if (showMasterUnlockDialog && card != null) {
+    // Диалог мастер-пароля
+    if (showMasterPasswordDialog) {
         AlertDialog(
             onDismissRequest = {
-                showMasterUnlockDialog = false
+                showMasterPasswordDialog = false
                 masterPassword = ""
             },
-            title = { Text("Мастер-правка путевого листа") },
+            title = { Text("Мастер-правка") },
             text = {
                 Column {
                     Text("Введите мастер-пароль для разблокировки путевого листа.")
-                    Text("СТАТУСЫ 'ПОДПИСАНО' (секретарь/судья) НЕ ТРЕБУЮТСЯ!",
-                        fontSize = 12.sp,
-                        color = Color(0xFFFF8C00),
-                        fontWeight = FontWeight.Bold)
-                    Text("После сохранения повторное подтверждение НЕ НУЖНО.",
-                        fontSize = 12.sp,
-                        color = Color(0xFFD32F2F))
+                    Text("Статусы подписей будут сохранены.", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = masterPassword,
@@ -584,25 +402,18 @@ fun TeamCardScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (vm.masterUnlockRouteCard(teamId, masterPassword)) {
-                            onNavigateToRouteCard?.invoke(teamId)
-                            showMasterUnlockDialog = false
-                            masterPassword = ""
-                        } else {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Неверный мастер-пароль")
-                            }
-                            masterPassword = ""
+                        if (vm.enterMasterEditMode(masterPassword)) {
+                            showMasterPasswordDialog = false
                         }
-                    },
-                    enabled = masterPassword.isNotBlank()
+                        masterPassword = ""
+                    }
                 ) {
-                    Text("РАЗБЛОКИРОВАТЬ И РЕДАКТИРОВАТЬ")
+                    Text("РАЗБЛОКИРОВАТЬ")
                 }
             },
             dismissButton = {
                 TextButton(onClick = {
-                    showMasterUnlockDialog = false
+                    showMasterPasswordDialog = false
                     masterPassword = ""
                 }) {
                     Text("Отмена")
@@ -610,429 +421,89 @@ fun TeamCardScreen(
             }
         )
     }
-}
 
-@Composable
-fun RouteCardStatusCard(
-    checkpointsEntered: Boolean,
-    teamStatus: String,
-    takenCount: Int,
-    totalCount: Int,
-    isMasterMode: Boolean,
-    onMasterUnlock: () -> Unit,
-    onFillRouteCard: () -> Unit
-) {
-    val status = when {
-        teamStatus == "disqualified" || teamStatus == "lost" -> RouteCardStatus.CANCELLED
-        checkpointsEntered -> RouteCardStatus.CONFIRMED
-        takenCount > 0 -> RouteCardStatus.IN_PROGRESS
-        else -> RouteCardStatus.EMPTY
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = when (status) {
-                RouteCardStatus.CONFIRMED -> Color(0xFF2E7D32).copy(alpha = 0.15f)
-                RouteCardStatus.IN_PROGRESS -> Color(0xFFFF8C00).copy(alpha = 0.15f)
-                RouteCardStatus.CANCELLED -> Color(0xFFD32F2F).copy(alpha = 0.15f)
-                RouteCardStatus.EMPTY -> MaterialTheme.colorScheme.surfaceVariant
-            }
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = when (status) {
-                            RouteCardStatus.CONFIRMED -> if (isMasterMode) "👑 МАСТЕР-РЕЖИМ" else "✅ ПУТЕВОЙ ЛИСТ"
-                            RouteCardStatus.IN_PROGRESS -> "📝 ПУТЕВОЙ ЛИСТ"
-                            RouteCardStatus.CANCELLED -> "❌ ПУТЕВОЙ ЛИСТ"
-                            RouteCardStatus.EMPTY -> "📋 ПУТЕВОЙ ЛИСТ"
-                        },
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = when (status) {
-                            RouteCardStatus.CONFIRMED -> if (isMasterMode) Color(0xFFF57C00) else Color(0xFF2E7D32)
-                            RouteCardStatus.IN_PROGRESS -> Color(0xFFFF8C00)
-                            RouteCardStatus.CANCELLED -> Color(0xFFD32F2F)
-                            RouteCardStatus.EMPTY -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                    if (status == RouteCardStatus.CANCELLED) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (teamStatus == "disqualified") "СНЯТЫ" else "LOST",
-                            fontSize = 10.sp,
-                            color = Color(0xFFD32F2F),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                when (status) {
-                    RouteCardStatus.CONFIRMED -> {
-                        if (isMasterMode) {
-                            Text(
-                                text = "Мастер-режим: редактирование без потери подтверждений",
-                                fontSize = 11.sp,
-                                color = Color(0xFFF57C00)
-                            )
-                        } else {
-                            Text(
-                                text = "Подтверждён судьёй. Данные закрыты.",
-                                fontSize = 11.sp,
-                                color = Color(0xFF2E7D32)
-                            )
-                        }
-                        TextButton(
-                            onClick = onMasterUnlock,
-                            modifier = Modifier.padding(start = 0.dp)
-                        ) {
-                            Text("🔓 Мастер-правка", fontSize = 11.sp, color = Color(0xFFF57C00))
-                        }
-                    }
-                    RouteCardStatus.IN_PROGRESS -> {
-                        Text(
-                            text = "Заполнено $takenCount из $totalCount КП",
-                            fontSize = 11.sp,
-                            color = Color(0xFFFF8C00)
-                        )
-                        Button(
-                            onClick = onFillRouteCard,
-                            modifier = Modifier.padding(top = 4.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            Text("📝 ЗАПОЛНИТЬ / ПРОДОЛЖИТЬ", fontSize = 11.sp)
-                        }
-                    }
-                    RouteCardStatus.EMPTY -> {
-                        Text(
-                            text = "Не заполнен",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Button(
-                            onClick = onFillRouteCard,
-                            modifier = Modifier.padding(top = 4.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            Text("📝 ЗАПОЛНИТЬ", fontSize = 11.sp)
-                        }
-                    }
-                    RouteCardStatus.CANCELLED -> {
-                        Text(
-                            text = if (teamStatus == "disqualified") "Команда снята с соревнований" else "Команда потеряна (ПСР)",
-                            fontSize = 11.sp,
-                            color = Color(0xFFD32F2F)
-                        )
-                    }
-                }
-            }
-
-            if (status != RouteCardStatus.CANCELLED) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "$takenCount/$totalCount",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = when {
-                            takenCount == totalCount && status == RouteCardStatus.CONFIRMED -> Color(0xFF2E7D32)
-                            takenCount == totalCount -> Color(0xFF00A86B)
-                            takenCount > 0 -> Color(0xFFFF8C00)
-                            else -> Color.Gray
-                        }
-                    )
-                    Text("КП взято", fontSize = 10.sp, color = Color.Gray)
-                }
-            }
-        }
-    }
-}
-
-enum class RouteCardStatus {
-    CONFIRMED,
-    IN_PROGRESS,
-    EMPTY,
-    CANCELLED
-}
-
-@Composable
-fun TimeStatsCard(
-    status: String,
-    startTime: String,
-    finishTime: String,
-    onFinishTimeClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("СТАРТ", fontSize = 11.sp, color = Color.Gray)
-                Text(
-                    text = startTime,
-                    fontSize = 18.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = if (startTime == "—:—:—") Color.Gray else Color(0xFF00A86B)
-                )
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("ФИНИШ", fontSize = 11.sp, color = Color.Gray)
-                Text(
-                    text = finishTime,
-                    fontSize = 18.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    modifier = if (status == "finished" && finishTime != "—:—:—") {
-                        Modifier.clickable { onFinishTimeClick() }
-                    } else Modifier,
-                    color = when {
-                        finishTime == "—:—:—" -> Color.Gray
-                        status == "finished" -> Color(0xFF2196F3)
-                        else -> Color(0xFF9E9E9E)
-                    }
-                )
-                if (status == "finished" && finishTime != "—:—:—") {
-                    Text(
-                        text = "нажмите для изменения",
-                        fontSize = 9.sp,
-                        color = Color(0xFF2196F3)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CheckpointsGrid(
-    checkpoints: List<CheckpointGridItem>,
-    onCheckpointClick: (CheckpointGridItem) -> Unit
-) {
-    val chunked = checkpoints.chunked(6)
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        chunked.forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                row.forEach { cp ->
-                    CheckpointCircle(
-                        checkpoint = cp,
-                        onClick = { onCheckpointClick(cp) }
-                    )
-                }
-                repeat(6 - row.size) {
-                    Spacer(modifier = Modifier.size(36.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CheckpointCircle(
-    checkpoint: CheckpointGridItem,
-    onClick: () -> Unit
-) {
-    val color = when {
-        checkpoint.taken && checkpoint.takenWithError -> Color(0xFFFF8C00)
-        checkpoint.taken -> Color(0xFF00A86B)
-        else -> Color(0xFF9E9E9E)
-    }
-
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(color)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "${checkpoint.displayNumber}",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
-    }
-}
-
-@Composable
-fun TeamMemberCard(
-    member: TeamCardMember,
-    isCaptain: Boolean,
-    canEdit: Boolean,
-    onReplace: () -> Unit,
-    onRemove: () -> Unit,
-    onAssignMentor: () -> Unit
-) {
-    var showActions by remember { mutableStateOf(false) }
-
-    val ageColor = when {
-        member.age != null && member.age < 14 -> Color(0xFFD32F2F)
-        member.age != null && member.age in 14..17 -> Color(0xFFFF8C00)
-        else -> Color(0xFF00A86B)
-    }
-
-    val needsMentor = member.age != null && member.age < 18 && member.mentorName == null
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = canEdit) { showActions = !showActions }
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
+    // Диалог корректировки времени финиша
+    if (showFinishTimeDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showFinishTimeDialog = false
+                finishTimeHours = ""
+                finishTimeMinutes = ""
+                finishTimeSeconds = ""
+            },
+            title = { Text("Корректировка времени финиша") },
+            text = {
+                Column {
+                    Text("Введите время в формате ЧЧ:ММ:СС", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.foundation.layout.Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = member.lastName.take(1).uppercase(),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Medium
+                        OutlinedTextField(
+                            value = finishTimeHours,
+                            onValueChange = {
+                                if (it.length <= 2 && it.all { c -> c.isDigit() }) {
+                                    finishTimeHours = it
+                                }
+                            },
+                            label = { Text("Часы") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = finishTimeMinutes,
+                            onValueChange = {
+                                if (it.length <= 2 && it.all { c -> c.isDigit() }) {
+                                    finishTimeMinutes = it
+                                }
+                            },
+                            label = { Text("Минуты") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = finishTimeSeconds,
+                            onValueChange = {
+                                if (it.length <= 2 && it.all { c -> c.isDigit() }) {
+                                    finishTimeSeconds = it
+                                }
+                            },
+                            label = { Text("Секунды") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
                         )
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "${member.lastName} ${member.firstName}${member.nickname?.let { " «$it»" } ?: ""}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                        if (member.age != null) {
-                            Text(
-                                text = "Возраст: ${member.age} лет",
-                                fontSize = 13.sp,
-                                color = ageColor
-                            )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val hours = finishTimeHours.toIntOrNull() ?: 0
+                        val minutes = finishTimeMinutes.toIntOrNull() ?: 0
+                        val seconds = finishTimeSeconds.toIntOrNull() ?: 0
+                        val totalSeconds = hours * 3600 + minutes * 60 + seconds
+                        if (totalSeconds > 0) {
+                            vm.adjustFinishTime(totalSeconds)
                         }
-                        if (member.phone != null) {
-                            Text(
-                                text = "📞 ${member.phone}",
-                                fontSize = 12.sp,
-                                color = Color.Gray
-                            )
-                        }
+                        showFinishTimeDialog = false
+                        finishTimeHours = ""
+                        finishTimeMinutes = ""
+                        finishTimeSeconds = ""
                     }
-                }
-                if (isCaptain) {
-                    Text(text = "👑", fontSize = 18.sp)
-                }
-            }
-
-            if (member.mentorName != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row {
-                    Text(
-                        text = "👨‍🏫 Ментор: ${member.mentorName}",
-                        fontSize = 13.sp,
-                        color = Color(0xFF1E5A7A)
-                    )
-                    if (!member.mentorConfirmed) {
-                        Text(
-                            text = " (не подтверждён)",
-                            fontSize = 12.sp,
-                            color = Color(0xFFD32F2F)
-                        )
-                    }
-                }
-            } else if (needsMentor && canEdit) {
-                Spacer(modifier = Modifier.height(4.dp))
-                TextButton(
-                    onClick = onAssignMentor,
-                    modifier = Modifier.padding(start = 0.dp)
                 ) {
-                    Text(
-                        text = "⚠️ Требуется ментор",
-                        fontSize = 12.sp,
-                        color = Color(0xFFD32F2F)
-                    )
+                    Text("СОХРАНИТЬ")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFinishTimeDialog = false
+                    finishTimeHours = ""
+                    finishTimeMinutes = ""
+                    finishTimeSeconds = ""
+                }) {
+                    Text("Отмена")
                 }
             }
-
-            if (member.judgeApproved) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "✅ Разрешено судьёй",
-                    fontSize = 12.sp,
-                    color = Color(0xFF2E7D32)
-                )
-            }
-
-            if (showActions && canEdit) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            onReplace()
-                            showActions = false
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(text = "🔄 Заменить", fontSize = 12.sp)
-                    }
-                    Button(
-                        onClick = {
-                            onRemove()
-                            showActions = false
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text(text = "❌ Исключить", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun statusToText(status: String): String {
-    return when (status) {
-        "registered" -> "Зарегистрирована"
-        "started" -> "На дистанции"
-        "finished" -> "Финишировала"
-        "lost" -> "Потеряна (ПСР)"
-        "disqualified" -> "Снята"
-        else -> status
+        )
     }
 }

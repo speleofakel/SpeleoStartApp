@@ -1,10 +1,11 @@
 package com.speleo.start.presentation.screen.teamcard
 
+import kotlinx.coroutines.flow.update
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
 import com.speleo.start.data.local.dao.AppSettingsDao
-import com.speleo.start.data.local.entity.PersonEntity
+import com.speleo.start.data.local.entity.ParticipantEntity
 import com.speleo.start.data.local.entity.TeamRouteCardEntity
 import com.speleo.start.data.repository.CompetitionRepository
 import com.speleo.start.data.repository.MasterRouteCardRepository
@@ -23,63 +24,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-data class TeamCardMember(
-    val participantId: Long,
-    val personId: Long,
-    val firstName: String,
-    val lastName: String,
-    val nickname: String?,
-    val birthDate: String?,
-    val phone: String?,
-    val gender: String?,
-    val age: Int?,
-    val role: String,
-    val mentorName: String?,
-    val mentorConfirmed: Boolean,
-    val judgeApproved: Boolean
-)
-
-data class TeamCardInfo(
-    val teamId: Long,
-    val number: Int,
-    val className: String,
-    val status: String,
-    val colorMark: String,
-    val startTimestamp: Long?,
-    val finishTimestamp: Long?,
-    val members: List<TeamCardMember>,
-    val replacedCount: Int,
-    val replacedMembers: List<String> = emptyList(),
-    val checkpointsEntered: Boolean = false
-)
-
-data class CheckpointGridItem(
-    val checkpointId: Long,
-    val displayNumber: Int,
-    val taken: Boolean,
-    val takenWithError: Boolean
-)
-
-data class RouteCardSaveEntry(
-    val checkpointId: Long,
-    val taken: Boolean,
-    val takenWithError: Boolean,
-    val offsetTime: Long?,
-    val penalty: Int
-)
-
-sealed class TeamCardEvent {
-    data class ShowMessage(val message: String) : TeamCardEvent()
-    data class ShowPasswordDialog(val action: String, val reason: String? = null) : TeamCardEvent()
-    data class ShowReplaceDialog(val participantId: Long, val currentPersonName: String) : TeamCardEvent()
-    data class TeamUpdated(val teamId: Long) : TeamCardEvent()
-}
+import timber.log.Timber
 
 @HiltViewModel
 class TeamCardVM @Inject constructor(
@@ -91,342 +39,522 @@ class TeamCardVM @Inject constructor(
     private val teamRouteCardRepo: TeamRouteCardRepository,
     private val competitionRepo: CompetitionRepository,
     private val prefs: PreferencesManager,
-    private val appSettingsDao: AppSettingsDao,
-    private val timerManager: TimerManager
+    private val appSettingsDao: AppSettingsDao
 ) : ViewModel() {
 
-    private val _teamCard = MutableStateFlow<TeamCardInfo?>(null)
-    val teamCard: StateFlow<TeamCardInfo?> = _teamCard.asStateFlow()
+    private val _uiState = MutableStateFlow(TeamCardUiState())
+    val uiState: StateFlow<TeamCardUiState> = _uiState.asStateFlow()
 
-    private val _checkpoints = MutableStateFlow<List<CheckpointGridItem>>(emptyList())
-    val checkpoints: StateFlow<List<CheckpointGridItem>> = _checkpoints.asStateFlow()
+    private val _event = MutableSharedFlow<TeamCardUiEvent>()
+    val event: SharedFlow<TeamCardUiEvent> = _event.asSharedFlow()
 
-    private val _startTimeRelative = MutableStateFlow("—:—:—")
-    val startTimeRelative: StateFlow<String> = _startTimeRelative.asStateFlow()
-
-    private val _finishTimeRelative = MutableStateFlow("—:—:—")
-    val finishTimeRelative: StateFlow<String> = _finishTimeRelative.asStateFlow()
-
-    private val _takenCount = MutableStateFlow(0)
-    val takenCount: StateFlow<Int> = _takenCount.asStateFlow()
-
-    private val _totalCheckpoints = MutableStateFlow(0)
-    val totalCheckpointsCount: StateFlow<Int> = _totalCheckpoints.asStateFlow()
-
-    private val _isMasterMode = MutableStateFlow(false)
-    val isMasterMode: StateFlow<Boolean> = _isMasterMode.asStateFlow()
-
-    private val _event = MutableSharedFlow<TeamCardEvent>()
-    val event: SharedFlow<TeamCardEvent> = _event.asSharedFlow()
-
+    private var teamId: Long = -1L
+    private var competitionId: Long = -1L
     private var competitionStartTimestamp: Long = 0L
+
+    // ============================================================
+    // ЗАГРУЗКА ДАННЫХ
+    // ============================================================
+
+    fun loadData(teamId: Long) {
+        this.teamId = teamId
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            loadCompetitionStartTimestamp()
+            loadTeamAndMembers()
+            loadRouteCard()
+            loadReplacedHistory()
+
+            _uiState.update { it.copy(isLoading = false) }
+        }
+    }
 
     private suspend fun loadCompetitionStartTimestamp() {
         competitionStartTimestamp = appSettingsDao.get(TimerManager.KEY_START_TIMESTAMP)?.toLongOrNull() ?: 0L
+        _uiState.update { it.copy(competitionStartTimestamp = competitionStartTimestamp) }
     }
 
-    fun loadTeam(teamId: Long) {
-        viewModelScope.launch {
-            loadCompetitionStartTimestamp()
+    private suspend fun loadTeamAndMembers() {
+        val team = teamRepo.getTeamById(teamId) ?: return
+        competitionId = team.competitionId
 
-            val team = teamRepo.getTeamById(teamId) ?: return@launch
+        val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
+        val activeParticipants = participants.filter { it.status == "active" }
 
-            updateRelativeTimes(team.startTimestamp, team.finishTimestamp)
+        val members = mutableListOf<MemberUi>()
+        for (participant in activeParticipants) {
+            val person = personRepo.getPersonById(participant.personId) ?: continue
+            val age = AgeCalculator.calculateAge(person.birthDate)
 
-            val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
-
-            val activeParticipants = participants.filter { participant -> participant.status == "active" }
-            val replacedParticipants = participants.filter { participant -> participant.status == "replaced" }
-
-            val members = mutableListOf<TeamCardMember>()
-            for (participant in activeParticipants) {
-                val person = personRepo.getPersonById(participant.personId) ?: continue
-                val age = AgeCalculator.calculateAge(person.birthDate)
-
-                var mentorName: String? = null
-                var mentorConfirmed = participant.mentorConfirmed
-
-                if (participant.mentorId != null) {
-                    val mentor = mentorRepo.getMentorByParticipantId(participant.id)
-                    if (mentor != null) {
-                        val mentorPerson = personRepo.getPersonById(mentor.personId)
-                        mentorName = mentorPerson?.let { "${it.lastName} ${it.firstName}" }
-                    }
+            var mentorName: String? = null
+            if (participant.mentorId != null) {
+                val mentor = mentorRepo.getMentorByParticipantId(participant.id)
+                if (mentor != null) {
+                    val mentorPerson = personRepo.getPersonById(mentor.personId)
+                    mentorName = mentorPerson?.let { "${it.lastName} ${it.firstName}" }
                 }
+            }
 
-                members.add(
-                    TeamCardMember(
-                        participantId = participant.id,
-                        personId = person.id,
-                        firstName = person.firstName,
-                        lastName = person.lastName,
-                        nickname = person.nickname,
-                        birthDate = person.birthDate,
-                        phone = person.phone,
-                        gender = person.gender,
-                        age = age,
-                        role = participant.role,
-                        mentorName = mentorName,
-                        mentorConfirmed = mentorConfirmed,
-                        judgeApproved = participant.judgeApproved
-                    )
+            members.add(
+                MemberUi(
+                    participantId = participant.id,
+                    personId = person.id,
+                    firstName = person.firstName,
+                    lastName = person.lastName,
+                    nickname = person.nickname,
+                    age = age,
+                    phone = person.phone,
+                    role = participant.role,
+                    mentorName = mentorName,
+                    mentorConfirmed = participant.mentorConfirmed,
+                    judgeApproved = participant.judgeApproved
                 )
-            }
+            )
+        }
 
-            val replacedMembers = mutableListOf<String>()
-            for (replaced in replacedParticipants) {
-                val person = personRepo.getPersonById(replaced.personId)
-                if (person != null) {
-                    replacedMembers.add("${person.lastName} ${person.firstName}")
-                }
-            }
+        val colorMark = calculateColorMark(members, team.status)
 
-            _teamCard.value = TeamCardInfo(
-                teamId = team.id,
-                number = team.teamNumber,
-                className = team.className,
-                status = team.status,
-                colorMark = team.colorMark,
-                startTimestamp = team.startTimestamp,
-                finishTimestamp = team.finishTimestamp,
-                members = members,
-                replacedCount = replacedParticipants.size,
-                replacedMembers = replacedMembers,
-                checkpointsEntered = team.checkpointsEntered
+        _uiState.update {
+            it.copy(
+                teamInfo = TeamInfo(
+                    id = team.id,
+                    number = team.teamNumber,
+                    className = team.className,
+                    status = team.status,
+                    colorMark = colorMark,
+                    startTimestamp = team.startTimestamp,
+                    finishTimestamp = team.finishTimestamp,
+                    checkpointsEntered = team.checkpointsEntered
+                ),
+                members = members
             )
         }
     }
 
-    fun loadCheckpoints(teamId: Long) {
-        viewModelScope.launch {
-            val team = teamRepo.getTeamById(teamId) ?: return@launch
+    private suspend fun loadRouteCard() {
+        val masterList = masterRouteCardRepo.getRouteCardByCompetitionFirst(competitionId)
+        val teamEntries = teamRouteCardRepo.getRouteCardByTeamFirst(teamId)
 
-            masterRouteCardRepo.getRouteCardByCompetition(team.competitionId)
-                .combine(teamRouteCardRepo.getRouteCardByTeam(teamId)) { master, teamRoute ->
-                    _totalCheckpoints.value = master.size
-                    _takenCount.value = teamRoute.count { it.taken }
+        val entries = masterList.map { master ->
+            val existing = teamEntries.find { it.checkpointId == master.id }
+            RouteCardEntryUi(
+                checkpointId = master.id,
+                displayNumber = master.displayNumber,
+                weight = master.weight,
+                type = master.type,
+                taken = existing?.taken ?: false,
+                takenWithError = existing?.takenWithError ?: false,
+                offsetTime = existing?.offsetTime?.let { formatSecondsToMmSs(it.toInt()) } ?: "",
+                penalty = existing?.penalty ?: 0,
+                secretaryConfirmed = existing?.secretaryConfirmed ?: false,
+                judgeConfirmed = existing?.judgeConfirmed ?: false
+            )
+        }
 
-                    master.map { cp ->
-                        val te = teamRoute.find { it.checkpointId == cp.id }
-                        CheckpointGridItem(
-                            checkpointId = cp.id,
-                            displayNumber = cp.displayNumber,
-                            taken = te?.taken ?: false,
-                            takenWithError = te?.takenWithError ?: false
-                        )
-                    }
-                }
-                .collect { _checkpoints.value = it }
+        val takenCount = entries.count { it.taken }
+        val totalCount = entries.size
+
+        _uiState.update {
+            it.copy(
+                routeCardEntries = entries,
+                routeCardStats = RouteCardStats(takenCount, totalCount)
+            )
         }
     }
 
-    private fun updateRelativeTimes(startTimestamp: Long?, finishTimestamp: Long?) {
-        if (competitionStartTimestamp == 0L) {
-            _startTimeRelative.value = "—:—:—"
-            _finishTimeRelative.value = "—:—:—"
-            return
-        }
+    private suspend fun loadReplacedHistory() {
+        val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
+        val replaced = participants.filter { it.status == "replaced" }
+        val replacedNames = mutableListOf<String>()
 
-        _startTimeRelative.value = startTimestamp?.let {
-            val relativeSeconds = (it - competitionStartTimestamp) / 1000
-            if (relativeSeconds < 0) "--:--:--" else formatRelativeTime(relativeSeconds.toInt())
-        } ?: "—:—:—"
-
-        _finishTimeRelative.value = finishTimestamp?.let {
-            val relativeSeconds = (it - competitionStartTimestamp) / 1000
-            if (relativeSeconds < 0) "--:--:--" else formatRelativeTime(relativeSeconds.toInt())
-        } ?: "—:—:—"
-    }
-
-    private fun formatRelativeTime(seconds: Int): String {
-        val hours = seconds / 3600
-        val minutes = (seconds % 3600) / 60
-        val secs = seconds % 60
-        return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, secs)
-        else "%02d:%02d".format(minutes, secs)
-    }
-
-    fun adjustFinishTimeRelative(relativeSeconds: Int) {
-        viewModelScope.launch {
-            val team = _teamCard.value ?: return@launch
-            if (competitionStartTimestamp == 0L) return@launch
-
-            val absoluteTimestamp = competitionStartTimestamp + (relativeSeconds * 1000L)
-            teamRepo.setFinishTimestamp(team.teamId, absoluteTimestamp)
-
-            _finishTimeRelative.value = formatRelativeTime(relativeSeconds)
-            _event.emit(TeamCardEvent.ShowMessage("Время финиша обновлено"))
-            loadTeam(team.teamId)
-        }
-    }
-
-    fun masterUnlockRouteCard(teamId: Long, password: String): Boolean {
-        if (password == "devdebug") {
-            viewModelScope.launch {
-                val team = teamRepo.getTeamById(teamId)
-                if (team != null) {
-                    teamRepo.updateTeam(team.copy(checkpointsEntered = false))
-                    _event.emit(TeamCardEvent.ShowMessage("🔓 Путевой лист разблокирован для мастер-правки"))
-                }
+        for (replacedParticipant in replaced) {
+            val person = personRepo.getPersonById(replacedParticipant.personId)
+            if (person != null) {
+                replacedNames.add("${person.lastName} ${person.firstName}")
             }
+        }
+
+        _uiState.update { it.copy(replacedHistory = replacedNames) }
+    }
+
+    // ============================================================
+    // РАСЧЁТ ЦВЕТОВОЙ МЕТКИ
+    // ============================================================
+
+    private fun calculateColorMark(members: List<MemberUi>, status: String): String {
+        if (status == "disqualified") return "СНЯТЫ"
+
+        val hasMinor = members.any { it.age != null && it.age in 14..17 && !it.mentorConfirmed }
+        val hasChild = members.any { it.age != null && it.age < 14 && !it.judgeApproved }
+        val hasMinorWithMentor = members.any { it.age != null && it.age in 14..17 && it.mentorConfirmed }
+        val hasChildWithPermission = members.any { it.age != null && it.age < 14 && it.judgeApproved }
+
+        return when {
+            hasChild -> "<14 !!!"
+            hasMinor -> "<17 !!!"
+            hasChildWithPermission -> "<14ок"
+            hasMinorWithMentor -> "14+"
+            else -> "18+"
+        }
+    }
+
+    // ============================================================
+    // ОБНОВЛЕНИЕ СТАТИСТИКИ КП
+    // ============================================================
+
+    private fun updateRouteCardStats() {
+        val entries = _uiState.value.routeCardEntries
+        val stats = RouteCardStats(
+            takenCount = entries.count { it.taken },
+            totalCount = entries.size
+        )
+        _uiState.update { it.copy(routeCardStats = stats) }
+    }
+
+    // ============================================================
+    // УПРАВЛЕНИЕ РЕЖИМАМИ
+    // ============================================================
+
+    fun enterEditMode() {
+        val currentState = _uiState.value
+        val teamInfo = currentState.teamInfo ?: return
+
+        if (teamInfo.status == "finished" && !teamInfo.checkpointsEntered) {
+            _uiState.update { it.copy(mode = TeamCardMode.EDIT) }
+        }
+    }
+
+    fun enterMasterEditMode(password: String): Boolean {
+        if (password == "devdebug") {
+            _uiState.update { it.copy(mode = TeamCardMode.MASTER_EDIT) }
+            _event.tryEmit(TeamCardUiEvent.ShowMessage("🔓 Мастер-режим активирован"))
             return true
         }
+        _event.tryEmit(TeamCardUiEvent.ShowMessage("❌ Неверный мастер-пароль"))
         return false
     }
 
-    fun masterSaveRouteCard(teamId: Long, entries: List<RouteCardSaveEntry>) {
+    fun cancelEdit() {
+        _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
         viewModelScope.launch {
-            val team = teamRepo.getTeamById(teamId) ?: return@launch
+            loadRouteCard()
+        }
+    }
 
-            for (entry in entries) {
-                val existing = teamRouteCardRepo.getEntry(teamId, entry.checkpointId)
+    // ============================================================
+    // РЕДАКТИРОВАНИЕ ПУТЕВОГО ЛИСТА
+    // ============================================================
+
+    fun updateCheckpointTaken(checkpointId: Long, taken: Boolean) {
+        val currentState = _uiState.value
+        val entries = currentState.routeCardEntries.toMutableList()
+        val index = entries.indexOfFirst { it.checkpointId == checkpointId }
+        if (index == -1) return
+
+        val old = entries[index]
+        entries[index] = old.copy(
+            taken = taken,
+            takenWithError = if (!taken) false else old.takenWithError
+        )
+
+        _uiState.update { it.copy(routeCardEntries = entries) }
+        updateRouteCardStats()
+
+        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+            saveEntryToDb(entries[index])
+        }
+    }
+
+    fun updateCheckpointError(checkpointId: Long, withError: Boolean) {
+        val currentState = _uiState.value
+        val entries = currentState.routeCardEntries.toMutableList()
+        val index = entries.indexOfFirst { it.checkpointId == checkpointId }
+        if (index == -1) return
+
+        val old = entries[index]
+        if (!old.taken) return
+
+        entries[index] = old.copy(takenWithError = withError)
+        _uiState.update { it.copy(routeCardEntries = entries) }
+        updateRouteCardStats()
+
+        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+            saveEntryToDb(entries[index])
+        }
+    }
+
+    fun updateCheckpointOffsetTime(checkpointId: Long, offsetTime: String) {
+        val currentState = _uiState.value
+        val entries = currentState.routeCardEntries.toMutableList()
+        val index = entries.indexOfFirst { it.checkpointId == checkpointId }
+        if (index == -1) return
+
+        entries[index] = entries[index].copy(offsetTime = offsetTime)
+        _uiState.update { it.copy(routeCardEntries = entries) }
+        updateRouteCardStats()
+
+        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+            saveEntryToDb(entries[index])
+        }
+    }
+
+    fun updateCheckpointPenalty(checkpointId: Long, penalty: Int) {
+        val currentState = _uiState.value
+        val entries = currentState.routeCardEntries.toMutableList()
+        val index = entries.indexOfFirst { it.checkpointId == checkpointId }
+        if (index == -1) return
+
+        entries[index] = entries[index].copy(penalty = penalty)
+        _uiState.update { it.copy(routeCardEntries = entries) }
+        updateRouteCardStats()
+
+        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+            saveEntryToDb(entries[index])
+        }
+    }
+
+    private fun saveEntryToDb(entry: RouteCardEntryUi) {
+        viewModelScope.launch {
+            val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
+            val teamRouteCard = TeamRouteCardEntity(
+                teamId = teamId,
+                checkpointId = entry.checkpointId,
+                taken = entry.taken,
+                takenWithError = entry.takenWithError,
+                offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
+                penalty = entry.penalty,
+                judgeConfirmed = entry.judgeConfirmed,
+                secretaryConfirmed = entry.secretaryConfirmed
+            )
+            teamRouteCardRepo.saveEntry(teamRouteCard)
+        }
+    }
+
+    // ============================================================
+    // ПОДПИСИ
+    // ============================================================
+
+    fun signAsSecretary() {
+        viewModelScope.launch {
+            val currentEntries = _uiState.value.routeCardEntries
+            for (entry in currentEntries) {
+                teamRouteCardRepo.confirmBySecretary(teamId, entry.checkpointId)
+            }
+            _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Подписано секретарём"))
+            checkAndLockRouteCard()
+            loadRouteCard()
+            updateRouteCardStats()
+        }
+    }
+
+    fun signAsJudge() {
+        viewModelScope.launch {
+            val currentEntries = _uiState.value.routeCardEntries
+            val timestamp = System.currentTimeMillis()
+            for (entry in currentEntries) {
+                teamRouteCardRepo.confirmByJudge(teamId, entry.checkpointId, timestamp)
+            }
+            _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Подписано судьёй"))
+            checkAndLockRouteCard()
+            loadRouteCard()
+            updateRouteCardStats()
+        }
+    }
+
+    private suspend fun checkAndLockRouteCard() {
+        val entries = teamRouteCardRepo.getRouteCardByTeamFirst(teamId)
+        val allConfirmed = entries.all { it.secretaryConfirmed && it.judgeConfirmed }
+
+        if (allConfirmed) {
+            val team = teamRepo.getTeamById(teamId)
+            if (team != null && !team.checkpointsEntered) {
+                teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+                _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("🔒 Путевой лист подтверждён и закрыт"))
+            }
+        }
+    }
+
+    // ============================================================
+    // МАСТЕР-СОХРАНЕНИЕ (сохраняет подписи)
+    // ============================================================
+
+    fun saveMasterChanges() {
+        viewModelScope.launch {
+            // Загружаем актуальные статусы подписей из БД
+            val currentSignatures = teamRouteCardRepo.getRouteCardByTeamFirst(teamId)
+                .associate { it.checkpointId to Pair(it.secretaryConfirmed, it.judgeConfirmed) }
+
+            // Сохраняем изменения, сохраняя подписи
+            for (entry in _uiState.value.routeCardEntries) {
+                val signatures = currentSignatures[entry.checkpointId] ?: Pair(false, false)
+                val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
+
                 val teamRouteCard = TeamRouteCardEntity(
                     teamId = teamId,
                     checkpointId = entry.checkpointId,
                     taken = entry.taken,
                     takenWithError = entry.takenWithError,
-                    offsetTime = entry.offsetTime,
+                    offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
                     penalty = entry.penalty,
-                    judgeConfirmed = existing?.judgeConfirmed ?: true,
-                    secretaryConfirmed = existing?.secretaryConfirmed ?: true
+                    secretaryConfirmed = signatures.first,
+                    judgeConfirmed = signatures.second
                 )
                 teamRouteCardRepo.saveEntry(teamRouteCard)
             }
 
-            teamRepo.updateTeam(team.copy(checkpointsEntered = true))
-            _isMasterMode.value = false
-            _event.emit(TeamCardEvent.ShowMessage("✅ Путевой лист сохранён. Подтверждения не требуются."))
-            loadTeam(teamId)
-            loadCheckpoints(teamId)
-        }
-    }
-
-    fun unlockRouteCardForEdit(teamId: Long) {
-        viewModelScope.launch {
-            val team = teamRepo.getTeamById(teamId) ?: return@launch
-            teamRepo.updateTeam(team.copy(checkpointsEntered = false))
-            _isMasterMode.value = false
-            loadTeam(teamId)
-            loadCheckpoints(teamId)
-        }
-    }
-
-    fun getColorMarkText(): String {
-        val card = _teamCard.value ?: return ""
-        val hasMinor = card.members.any { member -> member.age != null && member.age in 14..17 && !member.mentorConfirmed }
-        val hasChild = card.members.any { member -> member.age != null && member.age < 14 && !member.judgeApproved }
-        return when {
-            card.status == "disqualified" -> "СНЯТЫ"
-            hasChild -> "<14 !!!"
-            hasMinor -> "<17 !!!"
-            else -> {
-                if (card.members.any { member -> member.age != null && member.age in 14..17 }) "14+"
-                else if (card.members.any { member -> member.age != null && member.age < 14 }) "<14ок"
-                else "18+"
+            // Блокируем команду обратно
+            val team = teamRepo.getTeamById(teamId)
+            if (team != null) {
+                teamRepo.updateTeam(team.copy(checkpointsEntered = true))
             }
+
+            _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Изменения сохранены"))
+            _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
+            loadRouteCard()
+            updateRouteCardStats()
         }
     }
 
-    fun getFabAction(): String? {
-        val card = _teamCard.value ?: return null
-        return when (card.status) {
-            "started" -> "finish"
-            "finished" -> if (!card.checkpointsEntered) "route" else null
-            else -> null
+    // ============================================================
+    // КОРРЕКТИРОВКА ВРЕМЕНИ ФИНИША
+    // ============================================================
+
+    fun adjustFinishTime(relativeSeconds: Int) {
+        viewModelScope.launch {
+            val team = _uiState.value.teamInfo ?: return@launch
+            if (competitionStartTimestamp == 0L) {
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Соревнование не запущено"))
+                return@launch
+            }
+
+            val absoluteTimestamp = competitionStartTimestamp + (relativeSeconds * 1000L)
+            teamRepo.setFinishTimestamp(team.id, absoluteTimestamp)
+            teamRepo.updateTeamStatus(team.id, "finished")
+
+            _event.tryEmit(TeamCardUiEvent.ShowMessage("Время финиша обновлено"))
+            loadData(teamId)
         }
     }
 
-    fun canEdit(): Boolean {
-        val card = _teamCard.value ?: return false
-        return card.status == "registered" || card.status == "started"
+    fun showFinishTimeDialog() {
+        val finishTimestamp = _uiState.value.teamInfo?.finishTimestamp
+        val currentSeconds = if (finishTimestamp != null && competitionStartTimestamp > 0) {
+            ((finishTimestamp - competitionStartTimestamp) / 1000).toInt()
+        } else {
+            0
+        }
+        _event.tryEmit(TeamCardUiEvent.ShowFinishTimeDialog(currentSeconds))
     }
+
+    // ============================================================
+    // УПРАВЛЕНИЕ УЧАСТНИКАМИ
+    // ============================================================
 
     fun replaceMember(participantId: Long, newPersonId: Long) {
         viewModelScope.launch {
             try {
-                val oldParticipant = participantRepo.getParticipantById(participantId)
-                if (oldParticipant == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник не найден"))
-                    return@launch
-                }
-
-                val team = teamRepo.getTeamById(oldParticipant.teamId)
-                if (team == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Команда не найдена"))
-                    return@launch
-                }
-
-                val activeParticipants = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                var existingInTeam = false
-                for (participant in activeParticipants) {
-                    if (participant.personId == newPersonId) {
-                        existingInTeam = true
-                        break
-                    }
-                }
-                if (existingInTeam) {
-                    _event.emit(TeamCardEvent.ShowMessage("Эта персона уже в команде"))
-                    return@launch
-                }
+                val oldParticipant = participantRepo.getParticipantById(participantId) ?: return@launch
+                val team = teamRepo.getTeamById(oldParticipant.teamId) ?: return@launch
 
                 val existingInComp = participantRepo.findActiveByPersonAndComp(newPersonId, team.competitionId)
                 if (existingInComp != null) {
-                    val otherTeam = teamRepo.getTeamById(existingInComp.teamId)
-                    _event.emit(TeamCardEvent.ShowMessage(
-                        "Персона уже в команде №${otherTeam?.teamNumber} (${otherTeam?.className}-й класс)"
-                    ))
+                    _event.tryEmit(TeamCardUiEvent.ShowMessage("Персона уже в другой команде"))
                     return@launch
                 }
 
                 participantRepo.updateParticipantStatus(oldParticipant.id, "replaced")
 
-                val newParticipantId = participantRepo.addParticipant(
+                participantRepo.addParticipant(
                     teamId = team.id,
                     personId = newPersonId,
                     role = oldParticipant.role,
                     mentorId = oldParticipant.mentorId
                 )
 
-                if (newParticipantId != -1L) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник заменён"))
-                    loadTeam(team.id)
-                } else {
-                    _event.emit(TeamCardEvent.ShowMessage("Ошибка при добавлении участника"))
-                }
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Участник заменён"))
+                loadData(teamId)
             } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка: ${e.message}"))
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Ошибка: ${e.message}"))
             }
         }
     }
 
-    fun createQuickPerson(fullName: String, onResult: (PersonEntity) -> Unit) {
+    fun removeMember(participantId: Long) {
+        viewModelScope.launch {
+            try {
+                val participant = participantRepo.getParticipantById(participantId) ?: return@launch
+                val team = teamRepo.getTeamById(participant.teamId) ?: return@launch
+
+                val activeMembers = participantRepo.getActiveParticipantsByTeam(team.id).first()
+                if (activeMembers.size <= 1) {
+                    _event.tryEmit(TeamCardUiEvent.ShowMessage("Нельзя удалить последнего участника"))
+                    return@launch
+                }
+
+                participantRepo.updateParticipantStatus(participant.id, "free_agent")
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Участник исключён"))
+                loadData(team.id)
+            } catch (e: Exception) {
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Ошибка: ${e.message}"))
+            }
+        }
+    }
+
+    fun disbandTeam(reason: String) {
+        viewModelScope.launch {
+            val team = _uiState.value.teamInfo ?: return@launch
+
+            when (team.status) {
+                "finished", "lost", "disqualified" -> {
+                    _event.tryEmit(TeamCardUiEvent.ShowMessage("Нельзя расформировать ${team.status} команду"))
+                    return@launch
+                }
+                "started" -> {
+                    _event.tryEmit(TeamCardUiEvent.ShowMasterPasswordDialog {
+                        viewModelScope.launch {
+                            performDisband(reason)
+                        }
+                    })
+                    return@launch
+                }
+            }
+
+            performDisband(reason)
+        }
+    }
+
+    private suspend fun performDisband(reason: String) {
+        val team = _uiState.value.teamInfo ?: return
+
+        val activeParticipants = participantRepo.getActiveParticipantsByTeam(team.id).first()
+        for (participant in activeParticipants) {
+            participantRepo.updateParticipantStatus(participant.id, "free_agent")
+        }
+
+        teamRepo.updateTeamStatus(team.id, "disqualified")
+
+        val reasonText = if (reason.isNotBlank()) " Причина: $reason" else ""
+        _event.tryEmit(TeamCardUiEvent.ShowMessage("Команда №${team.number} расформирована.$reasonText"))
+        loadData(team.id)
+    }
+
+    fun createQuickPerson(fullName: String, onResult: (Long) -> Unit) {
         viewModelScope.launch {
             val parts = fullName.split(" ")
-            val rawLastName = parts[0]
-            val rawFirstName = if (parts.size > 1) parts.drop(1).joinToString(" ") else ""
-
-            val lastName = rawLastName.normalizeName()
-            val firstName = rawFirstName.normalizeName()
+            val lastName = parts.getOrNull(0)?.normalizeName() ?: ""
+            val firstName = parts.getOrNull(1)?.normalizeName() ?: ""
 
             val personId = personRepo.createPerson(
                 lastName = lastName,
-                firstName = firstName,
-                middleName = null,
-                birthDate = null,
-                phone = null,
-                gender = null
+                firstName = firstName
             )
 
             if (personId != -1L) {
-                val person = personRepo.getPersonById(personId)
-                if (person != null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Персона создана"))
-                    onResult(person)
-                } else {
-                    _event.emit(TeamCardEvent.ShowMessage("Ошибка: персона не найдена после создания"))
-                }
+                onResult(personId)
             } else {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка при создании персоны"))
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Ошибка создания персоны"))
             }
         }
     }
@@ -434,29 +562,20 @@ class TeamCardVM @Inject constructor(
     fun assignMentor(participantId: Long, mentorPersonId: Long) {
         viewModelScope.launch {
             try {
-                val participant = participantRepo.getParticipantById(participantId)
-                if (participant == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник не найден"))
-                    return@launch
-                }
-
-                val mentorPerson = personRepo.getPersonById(mentorPersonId)
-                if (mentorPerson == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Ментор не найден"))
-                    return@launch
-                }
+                val participant = participantRepo.getParticipantById(participantId) ?: return@launch
+                val mentorPerson = personRepo.getPersonById(mentorPersonId) ?: return@launch
 
                 val mentorAge = AgeCalculator.calculateAge(mentorPerson.birthDate)
                 if (mentorAge == null || mentorAge < 18) {
-                    _event.emit(TeamCardEvent.ShowMessage("Выбранный человек не может быть ментором (возраст < 18)"))
+                    _event.tryEmit(TeamCardUiEvent.ShowMessage("Ментор должен быть старше 18 лет"))
                     return@launch
                 }
 
                 var mentorEntity = mentorRepo.getMentorByPersonId(mentorPersonId)
                 if (mentorEntity == null) {
-                    val newMentorId = mentorRepo.createMentor(mentorPersonId)
-                    if (newMentorId == -1L) {
-                        _event.emit(TeamCardEvent.ShowMessage("Не удалось создать запись ментора"))
+                    val newId = mentorRepo.createMentor(mentorPersonId)
+                    if (newId == -1L) {
+                        _event.tryEmit(TeamCardUiEvent.ShowMessage("Ошибка создания ментора"))
                         return@launch
                     }
                     mentorEntity = mentorRepo.getMentorByPersonId(mentorPersonId)
@@ -468,86 +587,58 @@ class TeamCardVM @Inject constructor(
                     mentorConfirmed = true,
                     judgeApproved = participant.judgeApproved
                 )
-                _event.emit(TeamCardEvent.ShowMessage("Ментор ${mentorPerson.lastName} ${mentorPerson.firstName} назначен"))
-                loadTeam(participant.teamId)
+
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Ментор назначен"))
+                loadData(participant.teamId)
             } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка при назначении ментора: ${e.message}"))
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Ошибка: ${e.message}"))
             }
         }
     }
 
-    fun removeMember(participantId: Long) {
-        viewModelScope.launch {
-            try {
-                val participant = participantRepo.getParticipantById(participantId)
-                if (participant == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Участник не найден"))
-                    return@launch
-                }
+    // ============================================================
+    // ОТНОСИТЕЛЬНОЕ ВРЕМЯ ДЛЯ UI
+    // ============================================================
 
-                val team = teamRepo.getTeamById(participant.teamId)
-                if (team == null) {
-                    _event.emit(TeamCardEvent.ShowMessage("Команда не найдена"))
-                    return@launch
-                }
+    fun getRelativeTimes(): RelativeTimes {
+        val team = _uiState.value.teamInfo ?: return RelativeTimes("—:—:—", "—:—:—")
 
-                val activeMembers = participantRepo.getActiveParticipantsByTeam(team.id).first()
-                if (activeMembers.size <= 1) {
-                    _event.emit(TeamCardEvent.ShowMessage("Нельзя удалить последнего участника. Используйте «Расформировать»"))
-                    return@launch
-                }
-
-                participantRepo.updateParticipantStatus(participant.id, "free_agent")
-                _event.emit(TeamCardEvent.ShowMessage("Участник исключён из команды"))
-                loadTeam(team.id)
-            } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка: ${e.message}"))
-            }
+        val startSec = team.startTimestamp?.let {
+            val diff = (it - competitionStartTimestamp) / 1000
+            if (diff < 0) null else diff.toInt()
         }
+        val finishSec = team.finishTimestamp?.let {
+            val diff = (it - competitionStartTimestamp) / 1000
+            if (diff < 0) null else diff.toInt()
+        }
+
+        return RelativeTimes(
+            startTime = if (startSec != null) formatRelativeTime(startSec) else "—:—:—",
+            finishTime = if (finishSec != null) formatRelativeTime(finishSec) else "—:—:—"
+        )
     }
 
-    fun disbandTeam(password: String, reason: String) {
-        viewModelScope.launch {
-            val card = _teamCard.value
-            if (card == null) {
-                _event.emit(TeamCardEvent.ShowMessage("Команда не найдена"))
-                return@launch
-            }
-
-            when (card.status) {
-                "finished", "lost", "disqualified" -> {
-                    _event.emit(TeamCardEvent.ShowMessage("Нельзя расформировать ${card.status} команду"))
-                    return@launch
-                }
-                "started" -> {
-                    if (password != "1234" && password != "devdebug") {
-                        _event.emit(TeamCardEvent.ShowMessage("Неверный пароль"))
-                        return@launch
-                    }
-                }
-                "registered" -> { }
-            }
-
-            try {
-                val activeParticipants = participantRepo.getActiveParticipantsByTeam(card.teamId).first()
-                for (participant in activeParticipants) {
-                    participantRepo.updateParticipantStatus(participant.id, "free_agent")
-                }
-
-                teamRepo.updateTeamStatus(card.teamId, "disqualified")
-
-                val reasonText = if (reason.isNotBlank()) " Причина: $reason" else ""
-                _event.emit(TeamCardEvent.ShowMessage("Команда №${card.number} расформирована.$reasonText"))
-                loadTeam(card.teamId)
-            } catch (e: Exception) {
-                _event.emit(TeamCardEvent.ShowMessage("Ошибка: ${e.message}"))
-            }
-        }
+    private fun formatRelativeTime(seconds: Int): String {
+        val hours = seconds / 3600
+        val minutes = (seconds % 3600) / 60
+        val secs = seconds % 60
+        return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, secs)
+        else "%02d:%02d".format(minutes, secs)
     }
 
-    fun changeClass(newClassName: String, password: String? = null) {
-        viewModelScope.launch {
-            _event.emit(TeamCardEvent.ShowMessage("Смена класса временно недоступна"))
-        }
+    private fun formatSecondsToMmSs(totalSeconds: Int): String {
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "%02d:%02d".format(minutes, seconds)
+    }
+
+    private fun parseMmSsToSeconds(input: String): Int? {
+        if (input.isBlank()) return null
+        val parts = input.split(":")
+        return if (parts.size == 2) {
+            val minutes = parts[0].toIntOrNull() ?: return null
+            val seconds = parts[1].toIntOrNull() ?: return null
+            if (seconds in 0..59) minutes * 60 + seconds else null
+        } else null
     }
 }
