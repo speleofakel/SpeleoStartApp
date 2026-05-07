@@ -30,9 +30,13 @@ class TeamRouteCardRepository @Inject constructor(
         if (existing != null) {
             Timber.d("Updating existing entry")
             teamRouteCardDao.update(entry)
+            // Проверяем после обновления
+            val afterUpdate = teamRouteCardDao.getEntry(entry.teamId, entry.checkpointId)
+            Timber.d("After update: taken=${afterUpdate?.taken}")
         } else {
             Timber.d("Inserting new entry")
-            teamRouteCardDao.insert(entry)
+            val newId = teamRouteCardDao.insert(entry)
+            Timber.d("Inserted with id: $newId")
         }
     }
 
@@ -57,4 +61,12 @@ class TeamRouteCardRepository @Inject constructor(
     suspend fun getRouteCardByTeamFirst(teamId: Long): List<TeamRouteCardEntity> =
         teamRouteCardDao.getRouteCardByTeam(teamId).first()
 
+    // Для отладки — прямой update
+    suspend fun forceUpdateTaken(teamId: Long, checkpointId: Long, taken: Boolean) {
+        val entry = getEntry(teamId, checkpointId)
+        if (entry != null) {
+            teamRouteCardDao.update(entry.copy(taken = taken))
+            Timber.d("forceUpdateTaken: cp=$checkpointId, taken=$taken")
+        }
+    }
 }

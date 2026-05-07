@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
 import com.speleo.start.data.local.dao.AppSettingsDao
-import com.speleo.start.data.local.entity.ParticipantEntity
 import com.speleo.start.data.local.entity.TeamRouteCardEntity
 import com.speleo.start.data.repository.CompetitionRepository
 import com.speleo.start.data.repository.MasterRouteCardRepository
@@ -52,6 +51,9 @@ class TeamCardVM @Inject constructor(
     private var competitionId: Long = -1L
     private var competitionStartTimestamp: Long = 0L
 
+    // Кеш для сохранения текущих изменений мастера
+    private var masterEditCache: List<RouteCardEntryUi>? = null
+
     // ============================================================
     // ЗАГРУЗКА ДАННЫХ
     // ============================================================
@@ -65,6 +67,7 @@ class TeamCardVM @Inject constructor(
             loadTeamAndMembers()
             loadRouteCard()
             loadReplacedHistory()
+            loadSignatureStatus()
 
             _uiState.update { it.copy(isLoading = false) }
         }
@@ -73,6 +76,18 @@ class TeamCardVM @Inject constructor(
     private suspend fun loadCompetitionStartTimestamp() {
         competitionStartTimestamp = appSettingsDao.get(TimerManager.KEY_START_TIMESTAMP)?.toLongOrNull() ?: 0L
         _uiState.update { it.copy(competitionStartTimestamp = competitionStartTimestamp) }
+    }
+
+    private suspend fun loadSignatureStatus() {
+        val entries = teamRouteCardRepo.getRouteCardByTeamFirst(teamId)
+        val allSecretary = entries.all { it.secretaryConfirmed }
+        val allJudge = entries.all { it.judgeConfirmed }
+        _uiState.update {
+            it.copy(
+                isSecretarySigned = allSecretary,
+                isJudgeSigned = allJudge
+            )
+        }
     }
 
     private suspend fun loadTeamAndMembers() {
@@ -133,9 +148,14 @@ class TeamCardVM @Inject constructor(
     }
 
     private suspend fun loadRouteCard() {
+        Timber.d("=== LOAD ROUTE CARD START ===")
         val masterList = masterRouteCardRepo.getRouteCardByCompetitionFirst(competitionId)
         val teamEntries = teamRouteCardRepo.getRouteCardByTeamFirst(teamId)
 
+        Timber.d("Loaded ${teamEntries.size} entries from DB:")
+        teamEntries.forEach { entry ->
+            Timber.d("  cp=${entry.checkpointId}: taken=${entry.taken}, error=${entry.takenWithError}")
+        }
         val entries = masterList.map { master ->
             val existing = teamEntries.find { it.checkpointId == master.id }
             RouteCardEntryUi(
@@ -227,6 +247,8 @@ class TeamCardVM @Inject constructor(
 
     fun enterMasterEditMode(password: String): Boolean {
         if (password == "devdebug") {
+            // Сохраняем копию текущих entries перед мастер-правкой (для отмены)
+            masterEditCache = _uiState.value.routeCardEntries.map { it.copy() }
             _uiState.update { it.copy(mode = TeamCardMode.MASTER_EDIT) }
             _event.tryEmit(TeamCardUiEvent.ShowMessage("🔓 Мастер-режим активирован"))
             return true
@@ -236,7 +258,19 @@ class TeamCardVM @Inject constructor(
     }
 
     fun cancelEdit() {
-        _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
+        // Восстанавливаем сохранённую копию при отмене
+        if (_uiState.value.mode == TeamCardMode.MASTER_EDIT && masterEditCache != null) {
+            _uiState.update {
+                it.copy(
+                    mode = TeamCardMode.VIEW,
+                    routeCardEntries = masterEditCache ?: emptyList()
+                )
+            }
+            updateRouteCardStats()
+            masterEditCache = null
+        } else {
+            _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
+        }
         viewModelScope.launch {
             loadRouteCard()
         }
@@ -261,9 +295,11 @@ class TeamCardVM @Inject constructor(
         _uiState.update { it.copy(routeCardEntries = entries) }
         updateRouteCardStats()
 
-        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+        // В обычном режиме (EDIT) сохраняем сразу
+        if (currentState.mode == TeamCardMode.EDIT) {
             saveEntryToDb(entries[index])
         }
+        // В мастер-режиме НЕ сохраняем — ждём saveMasterChanges()
     }
 
     fun updateCheckpointError(checkpointId: Long, withError: Boolean) {
@@ -279,7 +315,7 @@ class TeamCardVM @Inject constructor(
         _uiState.update { it.copy(routeCardEntries = entries) }
         updateRouteCardStats()
 
-        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+        if (currentState.mode == TeamCardMode.EDIT) {
             saveEntryToDb(entries[index])
         }
     }
@@ -294,7 +330,7 @@ class TeamCardVM @Inject constructor(
         _uiState.update { it.copy(routeCardEntries = entries) }
         updateRouteCardStats()
 
-        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+        if (currentState.mode == TeamCardMode.EDIT) {
             saveEntryToDb(entries[index])
         }
     }
@@ -309,13 +345,17 @@ class TeamCardVM @Inject constructor(
         _uiState.update { it.copy(routeCardEntries = entries) }
         updateRouteCardStats()
 
-        if (currentState.mode != TeamCardMode.MASTER_EDIT) {
+        if (currentState.mode == TeamCardMode.EDIT) {
             saveEntryToDb(entries[index])
         }
     }
 
     private fun saveEntryToDb(entry: RouteCardEntryUi) {
         viewModelScope.launch {
+            Timber.d("=== SAVE TO DB: cp=${entry.displayNumber} ===")
+            Timber.d("  taken=${entry.taken}, error=${entry.takenWithError}")
+            Timber.d("  offsetTime=${entry.offsetTime}, penalty=${entry.penalty}")
+
             val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
             val teamRouteCard = TeamRouteCardEntity(
                 teamId = teamId,
@@ -327,7 +367,10 @@ class TeamCardVM @Inject constructor(
                 judgeConfirmed = entry.judgeConfirmed,
                 secretaryConfirmed = entry.secretaryConfirmed
             )
-            teamRouteCardRepo.saveEntry(teamRouteCard)
+
+            val result = teamRouteCardRepo.saveEntry(teamRouteCard)
+            Timber.d("  saveEntry result: $result")
+            Timber.d("=== SAVE TO DB END ===")
         }
     }
 
@@ -337,10 +380,16 @@ class TeamCardVM @Inject constructor(
 
     fun signAsSecretary() {
         viewModelScope.launch {
+            if (_uiState.value.isSecretarySigned) {
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Уже подписано секретарём"))
+                return@launch
+            }
+
             val currentEntries = _uiState.value.routeCardEntries
             for (entry in currentEntries) {
                 teamRouteCardRepo.confirmBySecretary(teamId, entry.checkpointId)
             }
+            _uiState.update { it.copy(isSecretarySigned = true) }
             _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Подписано секретарём"))
             checkAndLockRouteCard()
             loadRouteCard()
@@ -350,11 +399,22 @@ class TeamCardVM @Inject constructor(
 
     fun signAsJudge() {
         viewModelScope.launch {
+            if (_uiState.value.isJudgeSigned) {
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Уже подписано судьёй"))
+                return@launch
+            }
+
+            if (!_uiState.value.isSecretarySigned) {
+                _event.tryEmit(TeamCardUiEvent.ShowMessage("Сначала подпишите секретарём"))
+                return@launch
+            }
+
             val currentEntries = _uiState.value.routeCardEntries
             val timestamp = System.currentTimeMillis()
             for (entry in currentEntries) {
                 teamRouteCardRepo.confirmByJudge(teamId, entry.checkpointId, timestamp)
             }
+            _uiState.update { it.copy(isJudgeSigned = true) }
             _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Подписано судьёй"))
             checkAndLockRouteCard()
             loadRouteCard()
@@ -370,50 +430,101 @@ class TeamCardVM @Inject constructor(
             val team = teamRepo.getTeamById(teamId)
             if (team != null && !team.checkpointsEntered) {
                 teamRepo.updateTeam(team.copy(checkpointsEntered = true))
-                _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
+                _uiState.update {
+                    it.copy(
+                        mode = TeamCardMode.VIEW,
+                        isSecretarySigned = true,
+                        isJudgeSigned = true
+                    )
+                }
                 _event.tryEmit(TeamCardUiEvent.ShowMessage("🔒 Путевой лист подтверждён и закрыт"))
             }
         }
     }
 
     // ============================================================
-    // МАСТЕР-СОХРАНЕНИЕ (сохраняет подписи)
+    // МАСТЕР-СОХРАНЕНИЕ (СОЗРАНЯЕТ ИЗМЕНЕНИЯ И ПОДПИСИ)
     // ============================================================
 
     fun saveMasterChanges() {
         viewModelScope.launch {
-            // Загружаем актуальные статусы подписей из БД
+            Timber.d("=== MASTER SAVE: START ===")
+            Timber.d("teamId = $teamId")
+
+            var successCount = 0
+
+            // Получаем текущие подписи из БД
             val currentSignatures = teamRouteCardRepo.getRouteCardByTeamFirst(teamId)
                 .associate { it.checkpointId to Pair(it.secretaryConfirmed, it.judgeConfirmed) }
 
-            // Сохраняем изменения, сохраняя подписи
+            // Сохраняем каждую запись
             for (entry in _uiState.value.routeCardEntries) {
-                val signatures = currentSignatures[entry.checkpointId] ?: Pair(false, false)
-                val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
+                try {
+                    val signatures = currentSignatures[entry.checkpointId] ?: Pair(false, false)
+                    val offsetSeconds = parseMmSsToSeconds(entry.offsetTime)
 
-                val teamRouteCard = TeamRouteCardEntity(
-                    teamId = teamId,
-                    checkpointId = entry.checkpointId,
-                    taken = entry.taken,
-                    takenWithError = entry.takenWithError,
-                    offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
-                    penalty = entry.penalty,
-                    secretaryConfirmed = signatures.first,
-                    judgeConfirmed = signatures.second
-                )
-                teamRouteCardRepo.saveEntry(teamRouteCard)
+                    Timber.d("Saving cp=${entry.displayNumber}: taken=${entry.taken}, error=${entry.takenWithError}")
+
+                    // ПРЯМОЕ ОБНОВЛЕНИЕ через DAO
+                    val existing = teamRouteCardRepo.getEntry(teamId, entry.checkpointId)
+
+                    if (existing != null) {
+                        // Обновляем существующую запись
+                        val updated = existing.copy(
+                            taken = entry.taken,
+                            takenWithError = entry.takenWithError,
+                            offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
+                            penalty = entry.penalty,
+                            secretaryConfirmed = signatures.first,
+                            judgeConfirmed = signatures.second
+                        )
+                        teamRouteCardRepo.saveEntry(updated)
+                    } else {
+                        // Создаём новую
+                        val newEntry = TeamRouteCardEntity(
+                            teamId = teamId,
+                            checkpointId = entry.checkpointId,
+                            taken = entry.taken,
+                            takenWithError = entry.takenWithError,
+                            offsetTime = if (offsetSeconds != null) offsetSeconds.toLong() else null,
+                            penalty = entry.penalty,
+                            secretaryConfirmed = signatures.first,
+                            judgeConfirmed = signatures.second
+                        )
+                        teamRouteCardRepo.saveEntry(newEntry)
+                    }
+
+                    successCount++
+                    Timber.d("  ✅ CP${entry.displayNumber} saved")
+
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to save CP${entry.displayNumber}")
+                }
             }
 
-            // Блокируем команду обратно
+            // Блокируем команду
             val team = teamRepo.getTeamById(teamId)
-            if (team != null) {
+            if (team != null && !team.checkpointsEntered) {
                 teamRepo.updateTeam(team.copy(checkpointsEntered = true))
+                Timber.d("Team locked")
             }
 
-            _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Изменения сохранены"))
-            _uiState.update { it.copy(mode = TeamCardMode.VIEW) }
-            loadRouteCard()
+            // Обновляем UI
             updateRouteCardStats()
+            _uiState.update {
+                it.copy(
+                    mode = TeamCardMode.VIEW,
+                    isSecretarySigned = true,
+                    isJudgeSigned = true
+                )
+            }
+
+            masterEditCache = null
+            _event.tryEmit(TeamCardUiEvent.ShowMessage("✅ Сохранено $successCount КП"))
+            Timber.d("=== MASTER SAVE END: $successCount saved ===")
+
+            // Принудительно перезагружаем, чтобы показать актуальные данные
+            loadRouteCard()
         }
     }
 

@@ -12,16 +12,19 @@ data class TeamCardUiState(
     val teamInfo: TeamInfo? = null,
     val members: List<MemberUi> = emptyList(),
     val routeCardEntries: List<RouteCardEntryUi> = emptyList(),
-    val routeCardStats: RouteCardStats = RouteCardStats(),  // ← ДОБАВИТЬ ЭТУ СТРОКУ
+    val routeCardStats: RouteCardStats = RouteCardStats(),
     val replacedHistory: List<String> = emptyList(),
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
-    val competitionStartTimestamp: Long = 0L
+    val competitionStartTimestamp: Long = 0L,
+    val isSecretarySigned: Boolean = false,   // ← ДОБАВЛЕНО
+    val isJudgeSigned: Boolean = false        // ← ДОБАВЛЕНО
 )
+
 sealed class TeamCardMode {
-    object VIEW : TeamCardMode()
-    object EDIT : TeamCardMode()
-    object MASTER_EDIT : TeamCardMode()
+    object VIEW : TeamCardMode()                    // Обычный просмотр
+    object EDIT : TeamCardMode()                    // Редактирование ПЛ (до подписей)
+    object MASTER_EDIT : TeamCardMode()             // Мастер-правка (с сохранением подписей)
 }
 
 // ============================================================
@@ -97,7 +100,7 @@ data class RelativeTimes(
 // СОБЫТИЯ (для Snackbar и навигации)
 // ============================================================
 
-sealed class TeamCardUiEvent {  // ← ПЕРЕИМЕНОВАНО
+sealed class TeamCardUiEvent {
     data class ShowMessage(val message: String) : TeamCardUiEvent()
     data class ShowMasterPasswordDialog(val onSuccess: () -> Unit) : TeamCardUiEvent()
     data class ShowFinishTimeDialog(val currentSeconds: Int) : TeamCardUiEvent()
