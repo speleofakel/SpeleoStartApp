@@ -1,9 +1,7 @@
 package com.speleo.start.presentation.screen.teamcard
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -78,15 +75,15 @@ fun TeamHeaderCard(teamInfo: TeamInfo) {
 }
 
 // ============================================================
-// ВРЕМЕНА СТАРТА/ФИНИША
+// ВРЕМЕНА СТАРТА/ФИНИША (с кнопкой ✏️)
 // ============================================================
-@OptIn(ExperimentalFoundationApi::class)
+
 @Composable
 fun TimesCard(
     startTime: String,
     finishTime: String,
     status: String,
-    onFinishTimeLongClick: () -> Unit
+    onFinishTimeEdit: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -98,8 +95,10 @@ fun TimesCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // СТАРТ
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("СТАРТ", fontSize = 12.sp, color = Color.Gray)
                 Text(
@@ -110,36 +109,35 @@ fun TimesCard(
                     color = if (startTime != "—:—:—") Color(0xFF00A86B) else Color.Gray
                 )
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("ФИНИШ", fontSize = 12.sp, color = Color.Gray)
 
-                val finishModifier = if (status == "finished" && finishTime != "—:—:—") {
-                    Modifier.combinedClickable(
-                        onClick = { /* ничего не делаем, только долгий тап */ },
-                        onLongClick = onFinishTimeLongClick
+            // ФИНИШ с кнопкой редактирования
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("ФИНИШ", fontSize = 12.sp, color = Color.Gray)
+                    Text(
+                        text = finishTime,
+                        fontSize = 20.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = when {
+                            finishTime == "—:—:—" -> Color.Gray
+                            status == "finished" -> Color(0xFF2196F3)
+                            else -> Color(0xFF9E9E9E)
+                        }
                     )
-                } else {
-                    Modifier
                 }
 
-                Text(
-                    text = finishTime,
-                    fontSize = 20.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    modifier = finishModifier,
-                    color = when {
-                        finishTime == "—:—:—" -> Color.Gray
-                        status == "finished" -> Color(0xFF2196F3)
-                        else -> Color(0xFF9E9E9E)
-                    }
-                )
+                // Кнопка редактирования (только для finished команд)
                 if (status == "finished" && finishTime != "—:—:—") {
-                    Text(
-                        text = "долгий тап для изменения",
-                        fontSize = 9.sp,
-                        color = Color(0xFF2196F3)
-                    )
+                    IconButton(
+                        onClick = onFinishTimeEdit,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Text("✏️", fontSize = 16.sp)
+                    }
                 }
             }
         }
@@ -156,6 +154,8 @@ fun RouteCardStatusCard(
     checkpointsEntered: Boolean,
     status: String,
     isMasterMode: Boolean,
+    isSecretarySigned: Boolean,
+    isJudgeSigned: Boolean,
     onMasterUnlock: () -> Unit,
     onFillRouteCard: () -> Unit,
     onSecretarySign: () -> Unit,
@@ -183,7 +183,6 @@ fun RouteCardStatusCard(
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            // Заголовок и счётчик
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -223,7 +222,6 @@ fun RouteCardStatusCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Контент в зависимости от режима
             when {
                 isMasterMode -> {
                     Text(
@@ -251,7 +249,8 @@ fun RouteCardStatusCard(
                         fontSize = 11.sp,
                         color = Color(0xFFFF8C00)
                     )
-                    // в RouteCardStatusCard, внутри when (isInProgress)
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -260,22 +259,31 @@ fun RouteCardStatusCard(
                         Button(
                             onClick = onSecretarySign,
                             modifier = Modifier.weight(1f),
+                            enabled = !isSecretarySigned,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
+                                containerColor = if (isSecretarySigned) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             )
                         ) {
-                            Text("📝 Подписать секретарём", fontSize = 11.sp)
+                            Text(
+                                text = if (isSecretarySigned) "✅ Подписано секретарём" else "📝 Подписать секретарём",
+                                fontSize = 11.sp
+                            )
                         }
+
                         Button(
                             onClick = onJudgeSign,
                             modifier = Modifier.weight(1f),
+                            enabled = !isJudgeSigned && isSecretarySigned,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.secondary,
+                                containerColor = if (isJudgeSigned) Color(0xFF2E7D32) else MaterialTheme.colorScheme.secondary,
                                 contentColor = MaterialTheme.colorScheme.onSecondary
                             )
                         ) {
-                            Text("⚖️ Подписать судьёй", fontSize = 11.sp)
+                            Text(
+                                text = if (isJudgeSigned) "✅ Подписано судьёй" else "⚖️ Подписать судьёй",
+                                fontSize = 11.sp
+                            )
                         }
                     }
                 }
@@ -334,7 +342,7 @@ fun CheckpointsClusterGrid(
                     )
                 }
                 repeat(6 - row.size) {
-                    Spacer(modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.size(40.dp))
                 }
             }
         }
@@ -366,6 +374,14 @@ private fun CheckpointCircle(
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp
         )
+        if (checkpoint.type == "technical" && checkpoint.taken && !checkpoint.takenWithError) {
+            Text(
+                text = "*",
+                color = Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier.align(Alignment.TopEnd)
+            )
+        }
     }
 }
 
@@ -423,7 +439,6 @@ private fun EditableCheckpointRow(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Строка с номером, весом и кнопками
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -443,7 +458,6 @@ private fun EditableCheckpointRow(
                     modifier = Modifier.width(60.dp)
                 )
 
-                // Кнопка "ok"
                 Button(
                     onClick = { onTakenChange(!entry.taken) },
                     enabled = isEditable,
@@ -456,7 +470,6 @@ private fun EditableCheckpointRow(
                     Text("ok", color = Color.White, fontSize = 12.sp)
                 }
 
-                // Кнопка "Ошибка"
                 Button(
                     onClick = { onErrorChange(!entry.takenWithError) },
                     enabled = isEditable && entry.taken,
@@ -470,7 +483,6 @@ private fun EditableCheckpointRow(
                 }
             }
 
-            // Дополнительные поля для технических КП
             if (isTechnical) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -571,7 +583,6 @@ fun MemberCard(
                 }
             }
 
-            // Ментор
             if (member.mentorName != null) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row {
@@ -611,7 +622,6 @@ fun MemberCard(
                 )
             }
 
-            // Кнопки действий (только если canEdit и режим VIEW)
             if (canEdit) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(

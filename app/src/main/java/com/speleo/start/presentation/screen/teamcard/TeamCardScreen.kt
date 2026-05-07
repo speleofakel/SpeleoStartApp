@@ -142,15 +142,12 @@ fun TeamCardScreen(
 
                 // Времена
                 item {
+                    val relativeTimes = vm.getRelativeTimes()
                     TimesCard(
                         startTime = relativeTimes.startTime,
                         finishTime = relativeTimes.finishTime,
-                        status = teamInfo.status,
-                        onFinishTimeLongClick = {
-                            if (teamInfo.status == "finished") {
-                                vm.showFinishTimeDialog()
-                            }
-                        }
+                        status = uiState.teamInfo?.status ?: "",
+                        onFinishTimeEdit = { vm.showFinishTimeDialog() }
                     )
                 }
 
@@ -158,10 +155,12 @@ fun TeamCardScreen(
                 item {
                     RouteCardStatusCard(
                         stats = uiState.routeCardStats,
-                        checkpointsEntered = teamInfo.checkpointsEntered,
-                        status = teamInfo.status,
-                        isMasterMode = isMasterMode,
-                        onMasterUnlock = { showMasterPasswordDialog = true },
+                        checkpointsEntered = uiState.teamInfo?.checkpointsEntered ?: false,
+                        status = uiState.teamInfo?.status ?: "",
+                        isMasterMode = uiState.mode == TeamCardMode.MASTER_EDIT,
+                        isSecretarySigned = uiState.isSecretarySigned,
+                        isJudgeSigned = uiState.isJudgeSigned,
+                        onMasterUnlock = { /* твой диалог пароля */ },
                         onFillRouteCard = { vm.enterEditMode() },
                         onSecretarySign = { vm.signAsSecretary() },
                         onJudgeSign = { vm.signAsJudge() },
