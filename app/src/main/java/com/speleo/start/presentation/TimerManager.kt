@@ -1,5 +1,7 @@
 package com.speleo.start.presentation
 
+import android.media.AudioManager
+import android.media.ToneGenerator
 import com.speleo.start.data.local.dao.AppSettingsDao
 import com.speleo.start.data.local.entity.AppSettingsEntity
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +22,8 @@ class TimerManager @Inject constructor(
     private val settingsDao: AppSettingsDao
 ) {
     companion object {
+
+        const val FIRST_START_COUNTDOWN = 10
         const val KEY_START_TIMESTAMP = "competition_start_timestamp"
         const val KEY_COMPETITION_ACTIVE = "competition_active"
         const val KEY_COUNTDOWN_VALUE = "countdown_current_value"
@@ -27,7 +31,7 @@ class TimerManager @Inject constructor(
         const val KEY_FIRST_TEAM_STARTED = "first_team_started"
         const val KEY_CURRENT_INTERVAL = "countdown_interval"
         const val DEFAULT_START_INTERVAL = 60
-        const val FIRST_START_COUNTDOWN = 10
+
     }
 
     private val _mainTimer = MutableStateFlow(0L)
@@ -36,7 +40,6 @@ class TimerManager @Inject constructor(
     private val _countdown = MutableStateFlow(DEFAULT_START_INTERVAL)
     val countdown: StateFlow<Int> = _countdown.asStateFlow()
 
-    // Пауза ТОЛЬКО для обратного отсчёта. Главный таймер не имеет паузы.
     private val _countdownPaused = MutableStateFlow(false)
     val countdownPaused: StateFlow<Boolean> = _countdownPaused.asStateFlow()
 
@@ -49,6 +52,63 @@ class TimerManager @Inject constructor(
     private var mainJob: Job? = null
     private var countdownJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // ToneGenerator для звукового сопровождения
+    @Volatile
+    private var toneGenerator: ToneGenerator? = null
+
+    init {
+        initToneGenerator()
+    }
+
+    private fun initToneGenerator() {
+        try {
+            // STREAM_MUSIC вместо STREAM_NOTIFICATION — не зависит от настроек уведомлений
+            toneGenerator = ToneGenerator(
+                AudioManager.STREAM_MUSIC,
+                100
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Пересоздаёт ToneGenerator, если он был освобождён.
+     */
+    fun ensureToneGenerator() {
+        if (toneGenerator == null) {
+            initToneGenerator()
+        }
+    }
+
+    fun playCountdownBeep(secondsLeft: Int) {
+        try {
+            ensureToneGenerator()
+            toneGenerator?.let { generator ->
+                when (secondsLeft) {
+                    in 1..5 -> {
+                        generator.startTone(ToneGenerator.TONE_CDMA_PIP, 200)
+                    }
+                    0 -> {
+                        generator.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT, 1000)
+                    }
+                    else -> {
+                        // Ничего для 6-10 и прочих значений
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            toneGenerator?.release()
+            toneGenerator = null
+        }
+    }
+
+    fun releaseToneGenerator() {
+        toneGenerator?.release()
+        toneGenerator = null
+    }
 
     fun restoreFromSavedState() {
         CoroutineScope(Dispatchers.IO).launch {
@@ -66,12 +126,8 @@ class TimerManager @Inject constructor(
                 _countdown.value = savedCountdown ?: savedInterval
                 _countdownPaused.value = wasPaused
                 startMainLoop(keepStartRef = true)
-                // ✅ ИСПРАВЛЕНО: запускаем countdown loop если не на паузе и countdown > 0
                 if (!wasPaused && _countdown.value > 0) {
                     startCountdownLoop()
-                } else if (_countdown.value > 0) {
-                    // Если на паузе, не запускаем, но значение уже восстановлено
-                    // Это нормально
                 }
             }
         }
@@ -96,10 +152,6 @@ class TimerManager @Inject constructor(
         startCountdownLoop()
     }
 
-    /**
-     * Остановка главного таймера (по долгому тапу судьи)
-     * Требует пароль администратора (1234 или devdebug)
-     */
     fun stopMainTimer(password: String): Boolean {
         if (password != "1234" && password != "devdebug") {
             return false
@@ -112,7 +164,6 @@ class TimerManager @Inject constructor(
 
         CoroutineScope(Dispatchers.IO).launch {
             settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "false"))
-            // ✅ ИСПРАВЛЕНО: используем delete вместо remove
             settingsDao.delete(KEY_START_TIMESTAMP)
         }
 
@@ -140,10 +191,22 @@ class TimerManager @Inject constructor(
             while (isActive && _countdown.value > 0 && _started.value) {
                 if (!_countdownPaused.value) {
                     delay(1000)
-                    if (_countdown.value > 0) {
-                        _countdown.value -= 1
-                        // Сохраняем для восстановления после краша
+
+                    val currentValue = _countdown.value
+
+                    if (currentValue > 0) {
+                        // Звучит ПЕРЕД уменьшением: когда на экране N секунд
+                        if (currentValue in 1..10) {
+                            playCountdownBeep(currentValue)
+                        }
+
+                        _countdown.value = currentValue - 1
                         settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_VALUE, _countdown.value.toString()))
+
+                        // Финальный сигнал при достижении 0
+                        if (_countdown.value == 0) {
+                            playCountdownBeep(0)
+                        }
                     }
                 } else {
                     delay(100)
@@ -152,10 +215,6 @@ class TimerManager @Inject constructor(
         }
     }
 
-    /**
-     * Пауза/возобновление обратного отсчёта.
-     * Запрещено если осталось ≤ 10 секунд (звуковая индикация запущена).
-     */
     fun toggleCountdownPause(canPause: Boolean = true) {
         if (!canPause && _countdown.value <= 10) {
             return
@@ -195,7 +254,6 @@ class TimerManager @Inject constructor(
         _isFirstStart.value = true
         CoroutineScope(Dispatchers.IO).launch {
             settingsDao.put(AppSettingsEntity(KEY_COMPETITION_ACTIVE, "false"))
-            // ✅ ИСПРАВЛЕНО: используем delete вместо remove
             settingsDao.delete(KEY_COUNTDOWN_VALUE)
             settingsDao.delete(KEY_COUNTDOWN_PAUSED)
             settingsDao.delete(KEY_FIRST_TEAM_STARTED)

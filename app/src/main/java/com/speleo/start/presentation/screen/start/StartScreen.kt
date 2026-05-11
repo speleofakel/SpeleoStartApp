@@ -1,5 +1,6 @@
 package com.speleo.start.presentation.screen.start
 
+import android.media.ToneGenerator
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +41,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.speleo.start.presentation.component.NoActiveCompetitionScreen
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -69,7 +71,6 @@ fun StartScreen(
     val startInterval by vm.startInterval.collectAsStateWithLifecycle()
     val navigateToTeamCard by vm.navigateToTeamCard.collectAsStateWithLifecycle()
 
-    // ✅ ДОБАВЛЕНО: состояние для диалога остановки таймера
     var showStopTimerDialog by remember { mutableStateOf(false) }
     var stopTimerPassword by remember { mutableStateOf("") }
     var stopTimerError by remember { mutableStateOf<String?>(null) }
@@ -77,11 +78,28 @@ fun StartScreen(
     LaunchedEffect(Unit) { vm.loadQueue() }
     LaunchedEffect(queue) { vm.clearValidationError() }
 
-    // Навигация к карточке команды
+    // Обработка окончания обратного отсчёта
+    LaunchedEffect(Unit) {
+        vm.event.collectLatest { event ->
+            when (event) {
+                StartEvent.CountdownFinished -> {
+                    vm.startCurrentTeam()
+                }
+            }
+        }
+    }
+
     LaunchedEffect(navigateToTeamCard) {
         navigateToTeamCard?.let {
             onNavigateToTeamCard(it)
             vm.onTeamCardNavigated()
+        }
+    }
+
+    // Освобождаем звук при выходе
+    DisposableEffect(Unit) {
+        onDispose {
+            vm.timer.releaseToneGenerator()
         }
     }
 
@@ -123,7 +141,7 @@ fun StartScreen(
                     .padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ===== ГЛАВНЫЙ ТАЙМЕР (с обработкой долгого тапа) =====
+                // Главный таймер (оригинальный)
                 TimerDisplay(
                     mainTimer,
                     onLongPress = { showStopTimerDialog = true }
@@ -131,7 +149,7 @@ fun StartScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // ===== ОБРАТНЫЙ ОТСЧЁТ =====
+                // Обратный отсчёт (оригинальный)
                 if (started) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -166,7 +184,6 @@ fun StartScreen(
                                 )
                             }
 
-                            // Кнопка паузы обратного отсчёта (только если > 10 сек)
                             if (countdown > 10) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 OutlinedButton(
@@ -193,10 +210,10 @@ fun StartScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // ===== КНОПКА НАЧАТЬ СОРЕВНОВАНИЯ =====
+                // Кнопка НАЧАТЬ СОРЕВНОВАНИЯ (оригинальная)
                 if (!started) {
                     Button(
-                        onClick = { vm.timer.startCompetition(startInterval) },
+                        onClick = { vm.startCompetition() },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
@@ -208,7 +225,7 @@ fun StartScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // ===== КАРТОЧКА СТАРТУЮЩЕЙ КОМАНДЫ =====
+                // Карточка текущей команды (оригинальная, с небольшими изменениями)
                 val currentTeam = queue.firstOrNull()
                 if (currentTeam != null && started) {
                     ActiveTeamCard(
@@ -221,7 +238,17 @@ fun StartScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // ===== ОШИБКА ВАЛИДАЦИИ =====
+                // Карточка следующей команды (для отображения "ГОТОВИТСЯ")
+                val nextTeamForCard = queue.getOrNull(1)
+                if (nextTeamForCard != null && started) {
+                    ReadyTeamCard(
+                        team = nextTeamForCard,
+                        onNavigateToTeamCard = { vm.onTeamClick(nextTeamForCard.id) }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Ошибка валидации (оригинальная)
                 if (validationError != null) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -240,7 +267,7 @@ fun StartScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // ===== ОЧЕРЕДЬ =====
+                // Заголовок очереди (оригинальный)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -261,6 +288,7 @@ fun StartScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                // Очередь (оригинальная)
                 LazyColumn(
                     modifier = Modifier.weight(1f)
                 ) {
@@ -277,7 +305,7 @@ fun StartScreen(
         }
     }
 
-    // ✅ ДОБАВЛЕНО: Диалог остановки главного таймера
+    // Диалог остановки таймера (оригинальный)
     if (showStopTimerDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -343,7 +371,7 @@ fun StartScreen(
 fun TimerDisplay(
     millis: Long,
     modifier: Modifier = Modifier,
-    onLongPress: () -> Unit = {}  // ✅ ДОБАВЛЕНО
+    onLongPress: () -> Unit = {}
 ) {
     val totalSec = millis / 1000
     val hours = totalSec / 3600
@@ -363,7 +391,7 @@ fun TimerDisplay(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = { },
-                onLongClick = onLongPress  // ✅ ИСПРАВЛЕНО
+                onLongClick = onLongPress
             ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -441,7 +469,6 @@ private fun ActiveTeamCard(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Верхняя часть — кликабельная для перехода к карточке
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -452,7 +479,6 @@ private fun ActiveTeamCard(
                     )
                     .padding(12.dp)
             ) {
-                // Заголовок
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -475,7 +501,7 @@ private fun ActiveTeamCard(
                         }
                         Column {
                             Text(
-                                "КОМАНДА #${team.number}",
+                                "НА СТАРТЕ: КОМАНДА #${team.number}",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp
                             )
@@ -486,7 +512,6 @@ private fun ActiveTeamCard(
                             )
                         }
                     }
-                    // Цветовая метка по спеку
                     val (markColor, markText) = when (team.colorMark) {
                         "18+" -> Color(0xFF00A86B) to "18+"
                         "14+" -> Color(0xFFFFC107) to "14+"
@@ -512,7 +537,6 @@ private fun ActiveTeamCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Состав команды
                 team.members.forEach { member ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -541,7 +565,6 @@ private fun ActiveTeamCard(
                                 }
                             }
                         }
-                        // Ментор / возраст
                         if (member.age < 18) {
                             val mentorStatus = when {
                                 member.mentorName == null -> "⚠️ Нет ментора"
@@ -564,7 +587,6 @@ private fun ActiveTeamCard(
                     Spacer(modifier = Modifier.height(2.dp))
                 }
 
-                // Предупреждения
                 if (team.hasMentorIssues) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -576,7 +598,6 @@ private fun ActiveTeamCard(
                 }
             }
 
-            // КНОПКИ ДЕЙСТВИЙ — равной ширины, в ряд
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -606,8 +627,108 @@ private fun ActiveTeamCard(
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B)),
                     contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
-                    Text("▶ СТАРТ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    Text("СТАРТ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                 }
+            }
+        }
+    }
+}
+
+// НОВЫЙ КОМПОНЕНТ: карточка готовящейся команды
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ReadyTeamCard(
+    team: StartTeamInfo,
+    onNavigateToTeamCard: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onNavigateToTeamCard
+                )
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = "#${team.number}",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Column {
+                        Text(
+                            "ГОТОВИТСЯ: КОМАНДА #${team.number}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "${team.className}-й класс · ${team.memberCount} участника",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Показываем только первых двух участников для краткости
+            team.members.take(2).forEach { member ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "● ${member.lastName} ${member.firstName.firstOrNull()?.plus(".") ?: ""}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (member.age < 18) {
+                        val mentorStatus = when {
+                            member.mentorName == null -> "⚠️"
+                            !member.mentorConfirmed -> "⚠️"
+                            else -> "✓"
+                        }
+                        Text(mentorStatus, fontSize = 10.sp, color = if (member.mentorConfirmed) Color(0xFF00A86B) else Color(0xFFFF8C00))
+                    } else {
+                        Text("${member.age} лет", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+            }
+
+            if (team.members.size > 2) {
+                Text(
+                    "... и ещё ${team.members.size - 2}",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -643,7 +764,6 @@ private fun QueueItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Drag handle
                 Text(
                     "☰",
                     fontSize = 14.sp,
@@ -687,9 +807,6 @@ private fun QueueItem(
     }
 }
 
-/**
- * Формат обратного отсчёта: СС если < 60, ММ:СС если ≥ 60
- */
 private fun formatCountdown(seconds: Int): String {
     return if (seconds < 60) {
         "%02d".format(seconds)

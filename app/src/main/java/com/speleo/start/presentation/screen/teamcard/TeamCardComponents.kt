@@ -809,7 +809,7 @@ fun MemberCard(
         else -> Color(0xFF00A86B)
     }
 
-    val needsMentor = member.age != null && member.age < 18 && member.mentorName == null
+    val needsMentor = member.age != null && member.age < 18 && !member.mentorConfirmed
 
     Card(
         modifier = Modifier.fillMaxWidth()

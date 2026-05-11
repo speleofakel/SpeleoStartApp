@@ -8,6 +8,7 @@ import com.speleo.start.data.repository.CompetitionRepository
 import com.speleo.start.data.repository.ParticipantRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.presentation.SharedState
 import com.speleo.start.util.DateValidator
 import com.speleo.start.util.normalizeName
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,7 +33,8 @@ class TeamRegisterVM @Inject constructor(
     private val personRepo: PersonRepository,
     private val participantRepo: ParticipantRepository,
     private val competitionRepo: CompetitionRepository,
-    private val prefs: PreferencesManager
+    private val prefs: PreferencesManager,
+    private val sharedState: SharedState
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -227,10 +229,23 @@ class TeamRegisterVM @Inject constructor(
             resolvedMembers.forEachIndexed { index, member ->
                 val person = member.person ?: return@forEachIndexed
                 val mentorId = member.mentor?.id
+                // Там где добавляется участник
                 val participantId = participantRepo.addParticipant(
-                    teamId = teamId, personId = person.id,
-                    role = if (index == 0) "captain" else "member", mentorId = mentorId
+                    teamId = teamId,
+                    personId = person.id,
+                    role = if (index == 0) "captain" else "member",
+                    mentorId = mentorId
                 )
+
+// Сразу после добавления обновляем флаги
+                if (mentorId != null) {
+                    participantRepo.updateMentorAndFlags(
+                        id = participantId,
+                        mentorId = mentorId,
+                        mentorConfirmed = true,
+                        judgeApproved = member.judgeApproved
+                    )
+                }
                 if (participantId == -1L) {
                     _event.emit(UiEvent.ShowMessage("Ошибка добавления участника"))
                     return@launch

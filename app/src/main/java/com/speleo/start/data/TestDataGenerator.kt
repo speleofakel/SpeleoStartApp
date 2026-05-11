@@ -59,7 +59,7 @@ class TestDataGenerator @Inject constructor(
                     }
                     Log.d("TestDataGenerator", "✅ Создано соревнование ID: $compId")
 
-                    // 2. КОНТРОЛЬНЫЕ ПУНКТЫ
+                    // 2. КОНТРОЛЬНЫЕ ПУНКТЫ (12 штук)
                     for (i in 1..12) {
                         val cp = MasterRouteCardEntity(
                             competitionId = compId,
@@ -78,22 +78,29 @@ class TestDataGenerator @Inject constructor(
                     }
                     Log.d("TestDataGenerator", "✅ Создано 12 КП")
 
-                    // 3. ПЕРСОНЫ
-                    val maleFirst = listOf("Александр","Дмитрий","Максим","Сергей","Андрей","Алексей","Иван","Пётр","Николай","Владимир")
-                    val femaleFirst = listOf("Анна","Мария","Елена","Ольга","Татьяна","Наталья","Екатерина","Ирина","Светлана","Юлия")
-                    val maleLast = listOf("Иванов","Петров","Сидоров","Смирнов","Кузнецов","Попов","Васильев","Михайлов","Новиков","Фёдоров")
-                    val femaleLast = listOf("Иванова","Петрова","Сидорова","Смирнова","Кузнецова","Попова","Васильева","Михайлова","Новикова","Фёдорова")
-                    val nicks = listOf("Геолог","Спелеолог","Фонарик","Компас","Штольня","Каска","Верёвка","Камень","ЛетучаяМышь","Подземка","Шахтёр","Рудокоп","Сталкер","Крот","Бункер","Каньон","Сапёр","Маяк","Азимут","Горизонт")
+                    // 3. ПЕРСОНЫ (40 штук)
+                    val maleFirst = listOf("Александр","Дмитрий","Максим","Сергей","Андрей","Алексей","Иван","Пётр","Николай","Владимир","Артём","Даниил","Егор","Матвей","Тимофей","Роман","Кирилл","Михаил","Илья","Павел")
+                    val femaleFirst = listOf("Анна","Мария","Елена","Ольга","Татьяна","Наталья","Екатерина","Ирина","Светлана","Юлия","Евгения","Анастасия","Дарья","Полина","Виктория","Алина","Валерия","София","Алиса","Вероника")
+                    val maleLast = listOf("Иванов","Петров","Сидоров","Смирнов","Кузнецов","Попов","Васильев","Михайлов","Новиков","Фёдоров","Соколов","Лебедев","Козлов","Волков","Зайцев","Соловьёв","Борисов","Тимофеев","Григорьев","Егоров")
+                    val femaleLast = listOf("Иванова","Петрова","Сидорова","Смирнова","Кузнецова","Попова","Васильева","Михайлова","Новикова","Фёдорова","Соколова","Лебедева","Козлова","Волкова","Зайцева","Соловьёва","Борисова","Тимофеева","Григорьева","Егорова")
+                    val nicks = listOf("Геолог","Спелеолог","Фонарик","Компас","Штольня","Каска","Верёвка","Камень","ЛетучаяМышь","Подземка","Шахтёр","Рудокоп","Сталкер","Крот","Бункер","Каньон","Сапёр","Маяк","Азимут","Горизонт","Тоннель","Плутон","Страж","Феникс","Тень")
 
                     val personIds = mutableListOf<Long>()
-                    for (i in 0..19) {
-                        val isMale = i < 10
-                        val fn = if (isMale) maleFirst[i] else femaleFirst[i % 10]
-                        val ln = if (isMale) maleLast[i] else femaleLast[i % 10]
-                        val by = 2000 + (-20 + random.nextInt(32))
+                    for (i in 0..39) {
+                        val isMale = i < 20
+                        val fn = if (isMale) maleFirst[i % maleFirst.size] else femaleFirst[i % femaleFirst.size]
+                        val ln = if (isMale) maleLast[i % maleLast.size] else femaleLast[i % femaleLast.size]
+
+                        // Разброс возрастов: несколько детей (2008-2016), подростки (2005-2007), взрослые (1985-2004)
+                        val year = when {
+                            i in 0..4 -> 2016 + i  // дети: 2016-2020
+                            i in 5..9 -> 2008 + (i - 5)  // подростки: 2008-2012
+                            else -> 1985 + random.nextInt(20)  // взрослые: 1985-2004
+                        }
+
                         val bm = 1 + random.nextInt(12)
                         val bd = 1 + random.nextInt(28)
-                        val birth = "%02d.%02d.%04d".format(bd, bm, by)
+                        val birth = "%02d.%02d.%04d".format(bd, bm, year)
                         val phone = "+7 9%02d %03d-%02d-%02d".format(10+random.nextInt(90), 100+random.nextInt(900), 10+random.nextInt(90), 10+random.nextInt(90))
 
                         val pid = personDao.insert(
@@ -113,70 +120,112 @@ class TestDataGenerator @Inject constructor(
                     }
                     Log.d("TestDataGenerator", "✅ Создано ${personIds.size} персон")
 
-                    // 4. МЕНТОРЫ (первые 5 персон)
-                    for (i in 0..4) {
+                    // 4. МЕНТОРЫ (15 человек, все совершеннолетние)
+                    for (i in 0..14) {
                         if (i < personIds.size) {
                             mentorDao.insert(MentorEntity(personId = personIds[i]))
                         }
                     }
-                    Log.d("TestDataGenerator", "✅ Создано 5 менторов")
+                    Log.d("TestDataGenerator", "✅ Создано 15 менторов")
 
-                    // 5. КОМАНДЫ 2-го класса
-                    for (t in 1..6) {
+                    // 5. КОМАНДЫ 2-го класса (15 команд, все в статусе registered)
+                    for (t in 1..15) {
                         val tid = teamDao.insert(
                             TeamEntity(
                                 competitionId = compId,
                                 teamNumber = t,
                                 className = "2",
-                                status = when(t){
-                                    1,2 -> "registered"
-                                    3,4 -> "started"
-                                    5 -> "finished"
-                                    6 -> "disqualified"
-                                    else -> "registered"
-                                },
+                                status = "registered",
                                 colorMark = "green"
                             )
                         )
                         if (tid == -1L) continue
 
-                        val a = (t * 2) % personIds.size
-                        val b = (t * 2 + 1) % personIds.size
-                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
-                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
-                        if (t % 2 == 1 && t * 2 + 2 < personIds.size) {
-                            participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[(t * 2 + 2) % personIds.size], role = "member", status = "active"))
+                        // 2-3 участника в команде
+                        val memberCount = 2 + random.nextInt(2)
+                        val usedPersonIds = mutableSetOf<Long>()
+
+                        for (m in 0 until memberCount) {
+                            var pid = personIds[(t * 2 + m) % personIds.size]
+                            // Защита от дублирования участников в одной команде
+                            while (pid in usedPersonIds) {
+                                pid = personIds[(pid.toInt() + 1) % personIds.size]
+                            }
+                            usedPersonIds.add(pid)
+
+                            val role = if (m == 0) "captain" else "member"
+                            val person = personDao.getPersonById(pid)
+                            val age = calculateAge(person?.birthDate)
+
+                            // Для несовершеннолетних случайно назначаем ментора
+                            val mentorId = if (age != null && age < 18 && random.nextBoolean()) {
+                                val mentorPerson = personDao.getPersonById(personIds[random.nextInt(15)])
+                                mentorDao.getMentorByPersonId(mentorPerson?.id ?: -1L)?.id
+                            } else null
+
+                            participantDao.insert(
+                                ParticipantEntity(
+                                    teamId = tid,
+                                    personId = pid,
+                                    role = role,
+                                    status = "active",
+                                    mentorId = mentorId,
+                                    mentorConfirmed = mentorId != null,
+                                    judgeApproved = (age != null && age < 14) && random.nextBoolean()
+                                )
+                            )
                         }
                     }
-                    Log.d("TestDataGenerator", "✅ Создано 6 команд 2-го класса")
+                    Log.d("TestDataGenerator", "✅ Создано 15 команд 2-го класса")
 
-                    // 6. КОМАНДЫ 3-го класса
-                    for (t in 1..4) {
+                    // 6. КОМАНДЫ 3-го класса (15 команд, все в статусе registered)
+                    for (t in 1..15) {
                         val tid = teamDao.insert(
                             TeamEntity(
                                 competitionId = compId,
                                 teamNumber = t,
                                 className = "3",
-                                status = when(t){
-                                    1 -> "registered"
-                                    2 -> "started"
-                                    3 -> "finished"
-                                    4 -> "lost"
-                                    else -> "registered"
-                                },
+                                status = "registered",
                                 colorMark = "green"
                             )
                         )
                         if (tid == -1L) continue
 
-                        val a = (t * 2 + 10) % personIds.size
-                        val b = (t * 2 + 11) % personIds.size
-                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[a], role = "captain", status = "active"))
-                        participantDao.insert(ParticipantEntity(teamId = tid, personId = personIds[b], role = "member", status = "active"))
-                    }
-                    Log.d("TestDataGenerator", "✅ Создано 4 команды 3-го класса")
+                        val memberCount = 2 + random.nextInt(2)
+                        val usedPersonIds = mutableSetOf<Long>()
 
-                    Log.d("TestDataGenerator", "🎉 Тестовые данные успешно сгенерированы!")
+                        for (m in 0 until memberCount) {
+                            var pid = personIds[(t * 3 + 20 + m) % personIds.size]
+                            while (pid in usedPersonIds) {
+                                pid = personIds[(pid.toInt() + 1) % personIds.size]
+                            }
+                            usedPersonIds.add(pid)
+
+                            val role = if (m == 0) "captain" else "member"
+                            val person = personDao.getPersonById(pid)
+                            val age = calculateAge(person?.birthDate)
+
+                            val mentorId = if (age != null && age < 18 && random.nextBoolean()) {
+                                val mentorPerson = personDao.getPersonById(personIds[random.nextInt(15)])
+                                mentorDao.getMentorByPersonId(mentorPerson?.id ?: -1L)?.id
+                            } else null
+
+                            participantDao.insert(
+                                ParticipantEntity(
+                                    teamId = tid,
+                                    personId = pid,
+                                    role = role,
+                                    status = "active",
+                                    mentorId = mentorId,
+                                    mentorConfirmed = mentorId != null,
+                                    judgeApproved = (age != null && age < 14) && random.nextBoolean()
+                                )
+                            )
+                        }
+                    }
+                    Log.d("TestDataGenerator", "✅ Создано 15 команд 3-го класса")
+
+                    Log.d("TestDataGenerator", "🎉 Тестовые данные успешно сгенерированы! Всего команд: 30")
                 } catch (e: Exception) {
                     Log.e("TestDataGenerator", "❌ Ошибка при генерации: ${e.message}", e)
                 }
@@ -184,14 +233,32 @@ class TestDataGenerator @Inject constructor(
         }
     }
 
+    private fun calculateAge(birthDate: String?): Int? {
+        if (birthDate.isNullOrBlank() || birthDate.length != 10) return null
+        return try {
+            val day = birthDate.substring(0, 2).toInt()
+            val month = birthDate.substring(3, 5).toInt()
+            val year = birthDate.substring(6, 10).toInt()
+
+            val now = java.util.Calendar.getInstance()
+            val birth = java.util.Calendar.getInstance().apply { set(year, month - 1, day) }
+
+            var age = now.get(java.util.Calendar.YEAR) - birth.get(java.util.Calendar.YEAR)
+            if (now.get(java.util.Calendar.DAY_OF_YEAR) < birth.get(java.util.Calendar.DAY_OF_YEAR)) {
+                age--
+            }
+            age
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun clearAll() {
         withContext(Dispatchers.IO) {
             try {
-                // ✅ ИСПРАВЛЕНО: remove → delete
                 appSettingsDao.delete("competition_start_timestamp")
                 appSettingsDao.delete("competition_active")
 
-                // Удаляем в правильном порядке (дети → родители)
                 participantDao.deleteAll()
                 mentorDao.deleteAll()
                 masterRouteCardDao.deleteAll()

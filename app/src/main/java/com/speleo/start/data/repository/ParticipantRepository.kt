@@ -67,7 +67,6 @@ class ParticipantRepository @Inject constructor(
     suspend fun updateStatus(id: Long, status: String) =
         participantDao.updateStatus(id, status)
 
-    // Алиас для updateStatus — используется в TeamCardVM
     suspend fun updateParticipantStatus(id: Long, status: String) =
         participantDao.updateStatus(id, status)
 

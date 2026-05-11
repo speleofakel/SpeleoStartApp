@@ -25,7 +25,9 @@ sealed class Screen(val route: String) {
     object CompetitionSettings : Screen("competition_settings/{competitionId}") {
         fun pass(id: Long) = "competition_settings/$id"
     }
-    object TeamCard : Screen("team_card/{teamId}") {
+        object TeamCard : Screen("team_card/{teamId}") {
         fun pass(id: Long) = "team_card/$id"
     }
+
+
 }

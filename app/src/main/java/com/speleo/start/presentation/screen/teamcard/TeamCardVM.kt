@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import timber.log.Timber
 import java.util.regex.Pattern
-
+import com.speleo.start.presentation.SharedState
 @HiltViewModel
 class TeamCardVM @Inject constructor(
     private val teamRepo: TeamRepository,
@@ -39,7 +39,8 @@ class TeamCardVM @Inject constructor(
     private val teamRouteCardRepo: TeamRouteCardRepository,
     private val competitionRepo: CompetitionRepository,
     private val prefs: PreferencesManager,
-    private val appSettingsDao: AppSettingsDao
+    private val appSettingsDao: AppSettingsDao,
+    private val sharedState: SharedState
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TeamCardUiState())
@@ -131,10 +132,11 @@ class TeamCardVM @Inject constructor(
                     phone = person.phone,
                     role = participant.role,
                     mentorName = mentorName,
-                    mentorConfirmed = participant.mentorConfirmed,
+                    mentorConfirmed = participant.mentorConfirmed,  // ЭТО УЖЕ ДОЛЖНО БЫТЬ
                     judgeApproved = participant.judgeApproved
                 )
             )
+
         }
 
         val colorMark = calculateColorMark(members, team.status)
@@ -889,6 +891,10 @@ class TeamCardVM @Inject constructor(
 
                 emitEvent(TeamCardUiEvent.ShowMessage("Ментор назначен"))
                 loadData(participant.teamId)
+
+
+                sharedState.refreshStartQueue()
+
             } catch (e: Exception) {
                 emitEvent(TeamCardUiEvent.ShowMessage("Ошибка: ${e.message}"))
             }

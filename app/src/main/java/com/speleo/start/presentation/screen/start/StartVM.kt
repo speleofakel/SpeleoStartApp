@@ -3,16 +3,18 @@ package com.speleo.start.presentation.screen.start
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
-import com.speleo.start.data.local.entity.ParticipantEntity
-import com.speleo.start.data.local.entity.PersonEntity
 import com.speleo.start.data.repository.CompetitionRepository
 import com.speleo.start.data.repository.ParticipantRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
+import com.speleo.start.presentation.SharedState
 import com.speleo.start.presentation.TimerManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -26,7 +28,8 @@ data class StartMemberInfo(
     val role: String,
     val age: Int,
     val mentorName: String? = null,
-    val mentorConfirmed: Boolean = false
+    val mentorConfirmed: Boolean = false,
+    val judgeApproved: Boolean = false
 )
 
 data class StartTeamInfo(
@@ -37,13 +40,19 @@ data class StartTeamInfo(
     val memberCount: Int = 0,
     val hasMentorIssues: Boolean = false,
     val hasInactiveMembers: Boolean = false,
-    val colorMark: String = "18+"
+    val hasChildWithoutPermission: Boolean = false,
+    val colorMark: String = "18+",
+    val isReady: Boolean = false
 )
 
 data class StartValidationError(
     val message: String,
     val canProceed: Boolean = false
 )
+
+sealed class StartEvent {
+    data object CountdownFinished : StartEvent()
+}
 
 @HiltViewModel
 class StartVM @Inject constructor(
@@ -52,7 +61,8 @@ class StartVM @Inject constructor(
     private val personRepo: PersonRepository,
     private val competitionRepo: CompetitionRepository,
     private val prefs: PreferencesManager,
-    val timer: TimerManager
+    val timer: TimerManager,
+    private val sharedState: SharedState
 ) : ViewModel() {
 
     private val _queue = MutableStateFlow<List<StartTeamInfo>>(emptyList())
@@ -70,10 +80,34 @@ class StartVM @Inject constructor(
     private val _navigateToTeamCard = MutableStateFlow<Long?>(null)
     val navigateToTeamCard: StateFlow<Long?> = _navigateToTeamCard.asStateFlow()
 
+    private val _event = MutableSharedFlow<StartEvent>()
+    val event: SharedFlow<StartEvent> = _event.asSharedFlow()
+
     init {
         timer.restoreFromSavedState()
         checkActiveCompetition()
         loadStartInterval()
+        setupCountdownListener()
+
+        viewModelScope.launch {
+            sharedState.shouldRefreshStartQueue.collect {
+                if (it > 0) {
+                    loadQueue()
+                }
+            }
+        }
+    }
+
+    private fun setupCountdownListener() {
+        viewModelScope.launch {
+            var lastCountdown = -1
+            timer.countdown.collect { current ->
+                if (lastCountdown > 0 && current == 0) {
+                    _event.emit(StartEvent.CountdownFinished)
+                }
+                lastCountdown = current
+            }
+        }
     }
 
     fun onTeamCardNavigated() {
@@ -131,6 +165,9 @@ class StartVM @Inject constructor(
                         if (i < c2.size) result.add(enrichTeamInfo(c2[i]))
                         if (i < c3.size) result.add(enrichTeamInfo(c3[i]))
                     }
+                    if (result.isNotEmpty()) {
+                        result[0] = result[0].copy(isReady = true)
+                    }
                     result
                 }
                 .collect { _queue.value = it }
@@ -138,11 +175,8 @@ class StartVM @Inject constructor(
     }
 
     private suspend fun enrichTeamInfo(team: com.speleo.start.data.local.entity.TeamEntity): StartTeamInfo {
-        // Получаем участников команды
-        val participantsFlow = participantRepo.getParticipantsByTeam(team.id)
-        val participants = participantsFlow.first()
+        val participants = participantRepo.getParticipantsByTeam(team.id).first()
 
-        // Собираем информацию об участниках
         val memberInfos = mutableListOf<StartMemberInfo>()
         for (participant in participants) {
             val person = personRepo.getPersonById(participant.personId)
@@ -164,12 +198,12 @@ class StartVM @Inject constructor(
                     role = if (participant.role == "captain") "капитан" else "участник",
                     age = age,
                     mentorName = mentorName,
-                    mentorConfirmed = participant.mentorConfirmed == true
+                    mentorConfirmed = participant.mentorConfirmed,
+                    judgeApproved = participant.judgeApproved
                 )
             )
         }
 
-        // Проверка менторов для <18
         val hasMentorIssues = memberInfos.any { member ->
             if (member.age < 18) {
                 member.mentorName == null || !member.mentorConfirmed
@@ -178,17 +212,20 @@ class StartVM @Inject constructor(
             }
         }
 
-        // Проверка неактивных участников
+        val hasChildWithoutPermission = memberInfos.any { member ->
+            member.age < 14 && !member.judgeApproved
+        }
+
         val hasInactive = participants.any { participant ->
             participant.status != "active"
         }
 
-        // Цветовая метка по спеку SPEC_MASTER.md §2
         val colorMark = when {
             hasInactive -> "СНЯТЫ"
-            memberInfos.all { it.age >= 18 } -> "18+"
-            memberInfos.any { it.age < 14 } -> if (hasMentorIssues) "<14 !!!" else "<14ок"
-            memberInfos.any { it.age in 14..17 } -> if (hasMentorIssues) "<17 !!!" else "14+"
+            hasChildWithoutPermission -> "<14 !!!"
+            memberInfos.any { it.age < 14 } -> "<14ок"
+            memberInfos.any { it.age in 14..17 && !it.mentorConfirmed } -> "<17 !!!"
+            memberInfos.any { it.age in 14..17 } -> "14+"
             else -> "18+"
         }
 
@@ -200,7 +237,9 @@ class StartVM @Inject constructor(
             memberCount = participants.size,
             hasMentorIssues = hasMentorIssues,
             hasInactiveMembers = hasInactive,
-            colorMark = colorMark
+            hasChildWithoutPermission = hasChildWithoutPermission,
+            colorMark = colorMark,
+            isReady = false
         )
     }
 
@@ -231,7 +270,6 @@ class StartVM @Inject constructor(
 
             val first = currentQueue.first()
 
-            // Нельзя пропустить первую команду (Logic_Processes.md §2)
             val cid = prefs.activeCompetitionId
             val allTeams = teamRepo.getTeamsByCompetition(cid).first()
             val startedCount = allTeams.count { it.status == "started" }
@@ -257,7 +295,6 @@ class StartVM @Inject constructor(
 
             val first = currentQueue.first()
 
-            // Валидация 1: минимальный состав
             val cid = prefs.activeCompetitionId
             val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
             val minSize = parseMinTeamSizeFromSettings(comp.settingsJson)
@@ -270,7 +307,6 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
-            // Валидация 2: неактивные участники
             if (first.hasInactiveMembers) {
                 _validationError.value = StartValidationError(
                     message = "Есть неактивные участники",
@@ -279,7 +315,14 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
-            // Валидация 3: менторы для <18
+            if (first.hasChildWithoutPermission) {
+                _validationError.value = StartValidationError(
+                    message = "Нет разрешения судьи для участников до 14 лет",
+                    canProceed = false
+                )
+                return@launch
+            }
+
             if (first.hasMentorIssues) {
                 _validationError.value = StartValidationError(
                     message = "Не все менторы подтверждены для участников <18",
@@ -288,7 +331,6 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
-            // Всё ок — стартуем
             teamRepo.updateTeamStatus(first.id, "started")
             teamRepo.setStartTimestamp(first.id, System.currentTimeMillis())
 
@@ -313,6 +355,10 @@ class StartVM @Inject constructor(
 
     fun onTeamClick(teamId: Long) {
         _navigateToTeamCard.value = teamId
+    }
+
+    fun startCompetition() {
+        timer.startCompetition(TimerManager.FIRST_START_COUNTDOWN)
     }
 
     fun clearValidationError() {
