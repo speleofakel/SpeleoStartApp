@@ -75,6 +75,24 @@ fun TeamCardScreen(
         vm.loadData(teamId)
     }
 
+    // НОВЫЙ LaunchedEffect для авто-входа в режим редактирования
+    LaunchedEffect(uiState.teamInfo, uiState.mode) {
+        val team = uiState.teamInfo
+        val isMasterMode = uiState.mode == TeamCardMode.MASTER_EDIT
+        val isEditMode = uiState.mode == TeamCardMode.EDIT
+
+        if (team != null &&
+            team.status == "finished" &&
+            !team.checkpointsEntered &&
+            uiState.mode == TeamCardMode.VIEW &&
+            !isMasterMode &&
+            !isEditMode) {
+            // Автоматически входим в режим быстрого редактирования
+            vm.enterQuickEditMode()
+            checkpointEditMode = CheckpointEditMode.QUICK
+        }
+    }
+
     LaunchedEffect(uiState.teamInfo?.checkpointsEntered, uiState.isJudgeSigned) {
         if (uiState.teamInfo?.checkpointsEntered == true && checkpointEditMode == CheckpointEditMode.QUICK) {
             checkpointEditMode = CheckpointEditMode.VIEW

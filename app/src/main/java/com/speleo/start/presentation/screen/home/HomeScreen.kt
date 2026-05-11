@@ -1,9 +1,11 @@
 package com.speleo.start.presentation.screen.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -30,6 +33,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,8 +64,8 @@ data class MenuTile(
     val alwaysEnabled: Boolean = false
 )
 
-// Список пунктов меню (subtitle будут обновлены динамически)
-val MenuTiles = listOf(
+// Полный список всех плиток
+val AllMenuTiles = listOf(
     MenuTile("📋", "Соревнования", "Управление", Screen.Competitions, alwaysEnabled = true),
     MenuTile("📄", "Путевые", "0/0", null, alwaysEnabled = false),
     MenuTile("⏱️", "Старт", "Очередь: 0", Screen.Start, alwaysEnabled = false),
@@ -77,7 +81,7 @@ val MenuTiles = listOf(
 @Composable
 fun HomeScreen(
     onNavigate: (Screen) -> Unit,
-    onNavigateToRouteCard: (Long) -> Unit, // ← НОВЫЙ ПАРАМЕТР
+    onNavigateToTeamCard: (Long, Boolean) -> Unit, // teamId, openQuickEdit
     homeVM: HomeVM = hiltViewModel()
 ) {
     val configuration = LocalConfiguration.current
@@ -93,7 +97,7 @@ fun HomeScreen(
     val isArchived by homeVM.isArchived.collectAsStateWithLifecycle()
     val mainTimer by homeVM.mainTimer.collectAsStateWithLifecycle()
     val stats by homeVM.stats.collectAsStateWithLifecycle()
-    val finishedTeams by homeVM.finishedTeams.collectAsStateWithLifecycle()
+    val pendingTeams by homeVM.pendingTeams.collectAsStateWithLifecycle() // Команды для диалога
     val pendingRouteCards by homeVM.pendingRouteCards.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -101,9 +105,17 @@ fun HomeScreen(
         if (hasActiveCompetition && !isArchived) {
             homeVM.restoreTimer()
             homeVM.loadFinishedTeams()
+            homeVM.loadPendingTeamsWithMembers()
         } else if (isArchived) {
             homeVM.stopTimer()
         }
+    }
+
+    // Фильтруем плитки: если нет активного соревнования или архив, показываем только базовые
+    val visibleTiles = if (!hasActiveCompetition || isArchived) {
+        AllMenuTiles.filter { it.title == "Соревнования" || it.title == "Персоны" || it.title == "Настройки" }
+    } else {
+        AllMenuTiles
     }
 
     Scaffold(
@@ -113,16 +125,21 @@ fun HomeScreen(
                 title = {
                     Text(
                         if (competitionName.isNotBlank()) competitionName else "🏆 СпелеоСтарт",
-                        fontSize = 18.sp
+                        fontSize = 16.sp,
+                        maxLines = 1
                     )
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                modifier = Modifier.height(52.dp) // Уменьшенная высота
             )
         }
     ) { paddingValues ->
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp), // Уменьшено вдвое (было 12)
+            verticalArrangement = Arrangement.spacedBy(6.dp),   // Уменьшено вдвое
             contentPadding = PaddingValues(
                 start = 8.dp, end = 8.dp,
                 top = paddingValues.calculateTopPadding() + 4.dp,
@@ -135,7 +152,8 @@ fun HomeScreen(
                     !hasActiveCompetition -> {
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
@@ -168,7 +186,8 @@ fun HomeScreen(
                     isArchived -> {
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
@@ -201,7 +220,8 @@ fun HomeScreen(
                     else -> {
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
@@ -252,7 +272,7 @@ fun HomeScreen(
                 }
             }
 
-            items(MenuTiles) { tile ->
+            items(visibleTiles) { tile ->
                 // Динамическое обновление subtitle для плитки "Путевые"
                 val dynamicSubtitle = when {
                     tile.title == "Путевые" && pendingRouteCards.second > 0 ->
@@ -264,7 +284,6 @@ fun HomeScreen(
                 MenuTileCard(
                     tile = tile.copy(subtitle = dynamicSubtitle),
                     onNavigate = onNavigate,
-                    onNavigateToRouteCard = onNavigateToRouteCard,
                     onLongClick = if (tile.route == Screen.Settings) {{ showDevMenu = true }} else null,
                     onTileClick = { clickedTile ->
                         when {
@@ -303,6 +322,7 @@ fun HomeScreen(
         }
     }
 
+    // Dev меню (без изменений)
     if (showDevMenu) {
         AlertDialog(
             onDismissRequest = { showDevMenu = false },
@@ -325,6 +345,7 @@ fun HomeScreen(
         )
     }
 
+    // Диалог остановки таймера (без изменений)
     if (showStopTimerDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -374,7 +395,7 @@ fun HomeScreen(
         )
     }
 
-    // Диалог выбора команды для путевого листа
+    // НОВЫЙ ДИАЛОГ выбора команды для путевого листа
     if (showTeamPickerDialog) {
         AlertDialog(
             onDismissRequest = { showTeamPickerDialog = false },
@@ -384,19 +405,72 @@ fun HomeScreen(
                     Text("Выберите команду для заполнения путевого листа:", fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    if (finishedTeams.isEmpty()) {
+                    if (pendingTeams.isEmpty()) {
                         Text("Нет команд с незаполненными путевыми листами", fontSize = 13.sp, color = Color.Gray)
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            finishedTeams.forEach { team ->
-                                Button(
-                                    onClick = {
-                                        onNavigateToRouteCard(team.id) // ← ИСПОЛЬЗУЕМ НОВЫЙ CALLBACK
-                                        showTeamPickerDialog = false
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
+                            pendingTeams.forEach { team ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .combinedClickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = {
+                                                onNavigateToTeamCard(team.id, true) // openQuickEdit = true
+                                                showTeamPickerDialog = false
+                                            }
+                                        ),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                                 ) {
-                                    Text("№${team.number} (${team.className}-й класс)", fontSize = 13.sp)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Левая часть: номер команды в квадрате
+                                        Box(
+                                            modifier = Modifier
+                                                .width(48.dp)
+                                                .height(48.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.primaryContainer,
+                                                    MaterialTheme.shapes.medium
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = team.number.toString(),
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        // Правая часть: класс + фамилии
+                                        Column(
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = "${team.className}-й класс",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                text = team.membersShort,
+                                                fontSize = 11.sp,
+                                                color = Color.Gray,
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -479,7 +553,6 @@ fun MainTimerDisplay(
 fun MenuTileCard(
     tile: MenuTile,
     onNavigate: (Screen) -> Unit,
-    onNavigateToRouteCard: (Long) -> Unit,
     onLongClick: (() -> Unit)? = null,
     onTileClick: (MenuTile) -> Unit,
     hasActiveCompetition: Boolean = false,
@@ -497,7 +570,6 @@ fun MenuTileCard(
         else -> true
     }
 
-    // Цвет subtitle для плитки "Путевые"
     val subtitleColor = when {
         tile.title == "Путевые" && pendingCount > 0 && pendingCount == totalCount -> Color(0xFF00A86B)
         tile.title == "Путевые" && pendingCount > 0 -> Color(0xFFFF8C00)
@@ -515,7 +587,8 @@ fun MenuTileCard(
             } else {
                 MaterialTheme.colorScheme.surfaceVariant
             }
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp) // Добавлена тень
     ) {
         Column(
             modifier = Modifier

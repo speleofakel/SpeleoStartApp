@@ -60,8 +60,9 @@ class MainActivity : ComponentActivity() {
                                 onNavigate = { screen ->
                                     navController.navigate(screen.route)
                                 },
-                                onNavigateToRouteCard = { teamId ->
-                                    navController.navigate(Screen.RouteCardDetail.pass(teamId))
+                                onNavigateToTeamCard = { teamId, openQuickEdit ->
+                                    // Переходим напрямую в карточку команды
+                                    navController.navigate(Screen.TeamCard.pass(teamId))
                                 }
                             )
                         }

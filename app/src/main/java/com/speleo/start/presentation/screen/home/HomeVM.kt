@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.TestDataGenerator
 import com.speleo.start.data.local.PreferencesManager
 import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.ParticipantRepository
+import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
 import com.speleo.start.presentation.TimerManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,12 +35,22 @@ data class TeamListInfo(
     val timeInfo: String
 )
 
+// НОВЫЙ data class для диалога
+data class PendingTeamInfo(
+    val id: Long,
+    val number: Int,
+    val className: String,
+    val membersShort: String // первые две фамилии
+)
+
 @HiltViewModel
 class HomeVM @Inject constructor(
     private val generator: TestDataGenerator,
     private val prefs: PreferencesManager,
     private val competitionRepo: CompetitionRepository,
     private val teamRepo: TeamRepository,
+    private val participantRepo: ParticipantRepository,
+    private val personRepo: PersonRepository,
     val timerManager: TimerManager
 ) : ViewModel() {
 
@@ -60,6 +72,10 @@ class HomeVM @Inject constructor(
     private val _pendingRouteCards = MutableStateFlow(Pair(0, 0)) // (pending, total)
     val pendingRouteCards: StateFlow<Pair<Int, Int>> = _pendingRouteCards.asStateFlow()
 
+    // НОВЫЙ flow для диалога
+    private val _pendingTeams = MutableStateFlow<List<PendingTeamInfo>>(emptyList())
+    val pendingTeams: StateFlow<List<PendingTeamInfo>> = _pendingTeams.asStateFlow()
+
     val mainTimer = timerManager.mainTimer
 
     init {
@@ -77,6 +93,7 @@ class HomeVM @Inject constructor(
             _competitionName.value = ""
             _stats.value = CompetitionStats()
             _pendingRouteCards.value = Pair(0, 0)
+            _pendingTeams.value = emptyList()
             timerManager.stop()
             return
         }
@@ -90,6 +107,7 @@ class HomeVM @Inject constructor(
             _competitionName.value = ""
             _stats.value = CompetitionStats()
             _pendingRouteCards.value = Pair(0, 0)
+            _pendingTeams.value = emptyList()
             timerManager.stop()
             return
         }
@@ -101,6 +119,7 @@ class HomeVM @Inject constructor(
         if (!comp.isArchived) {
             timerManager.restoreFromSavedState()
             loadFinishedTeams()
+            loadPendingTeamsWithMembers()
         } else {
             timerManager.stop()
         }
@@ -147,6 +166,48 @@ class HomeVM @Inject constructor(
         }
     }
 
+    // НОВЫЙ метод: загружает команды с незаполненным ПЛ и первыми двумя участниками
+    fun loadPendingTeamsWithMembers() {
+        viewModelScope.launch {
+            val cid = prefs.activeCompetitionId
+            if (cid == -1L) return@launch
+
+            val teams = teamRepo.getTeamsByCompetition(cid).first()
+            val pendingTeamsList = teams.filter { it.status == "finished" && !it.checkpointsEntered }
+
+            val result = mutableListOf<PendingTeamInfo>()
+            for (team in pendingTeamsList) {
+                val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
+                val firstTwoNames = mutableListOf<String>()
+
+                for (i in 0 until minOf(2, participants.size)) {
+                    val person = personRepo.getPersonById(participants[i].personId)
+                    if (person != null) {
+                        val initial = if (person.firstName.isNotEmpty()) "${person.firstName.first()}." else ""
+                        firstTwoNames.add("${person.lastName} $initial")
+                    }
+                }
+
+                val membersShort = if (firstTwoNames.isNotEmpty()) {
+                    firstTwoNames.joinToString(", ")
+                } else {
+                    "Нет участников"
+                }
+
+                result.add(
+                    PendingTeamInfo(
+                        id = team.id,
+                        number = team.teamNumber,
+                        className = team.className,
+                        membersShort = membersShort
+                    )
+                )
+            }
+
+            _pendingTeams.value = result
+        }
+    }
+
     fun restoreTimer() {
         timerManager.restoreFromSavedState()
     }
@@ -178,6 +239,7 @@ class HomeVM @Inject constructor(
             _competitionName.value = ""
             _stats.value = CompetitionStats()
             _pendingRouteCards.value = Pair(0, 0)
+            _pendingTeams.value = emptyList()
             timerManager.stop()
         }
     }
