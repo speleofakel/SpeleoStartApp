@@ -1,7 +1,10 @@
 package com.speleo.start.presentation.screen.teamcard
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,32 +13,40 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-// ============================================================
-// ОСНОВНАЯ ИНФОРМАЦИЯ О КОМАНДЕ
-// ============================================================
 
 @Composable
 fun TeamHeaderCard(teamInfo: TeamInfo) {
@@ -74,16 +85,12 @@ fun TeamHeaderCard(teamInfo: TeamInfo) {
     }
 }
 
-// ============================================================
-// ВРЕМЕНА СТАРТА/ФИНИША (с кнопкой ✏️)
-// ============================================================
-
 @Composable
 fun TimesCard(
     startTime: String,
     finishTime: String,
     status: String,
-    onFinishTimeEdit: () -> Unit
+    onFinishTimeLongClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -98,7 +105,6 @@ fun TimesCard(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // СТАРТ
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("СТАРТ", fontSize = 12.sp, color = Color.Gray)
                 Text(
@@ -110,43 +116,33 @@ fun TimesCard(
                 )
             }
 
-            // ФИНИШ с кнопкой редактирования
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("ФИНИШ", fontSize = 12.sp, color = Color.Gray)
-                    Text(
-                        text = finishTime,
-                        fontSize = 20.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = when {
-                            finishTime == "—:—:—" -> Color.Gray
-                            status == "finished" -> Color(0xFF2196F3)
-                            else -> Color(0xFF9E9E9E)
-                        }
-                    )
-                }
-
-                // Кнопка редактирования (только для finished команд)
-                if (status == "finished" && finishTime != "—:—:—") {
-                    IconButton(
-                        onClick = onFinishTimeEdit,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Text("✏️", fontSize = 16.sp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("ФИНИШ", fontSize = 12.sp, color = Color.Gray)
+                Text(
+                    text = finishTime,
+                    fontSize = 20.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = if (status == "finished") Modifier.pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { onFinishTimeLongClick() })
+                    } else Modifier,
+                    color = when {
+                        finishTime == "—:—:—" -> Color.Gray
+                        status == "finished" -> Color(0xFF2196F3)
+                        else -> Color(0xFF9E9E9E)
                     }
+                )
+                if (status == "finished" && finishTime != "—:—:—") {
+                    Text(
+                        text = "долгий тап для изменения",
+                        fontSize = 9.sp,
+                        color = Color(0xFF2196F3)
+                    )
                 }
             }
         }
     }
 }
-
-// ============================================================
-// СТАТУС ПУТЕВОГО ЛИСТА
-// ============================================================
 
 @Composable
 fun RouteCardStatusCard(
@@ -157,15 +153,20 @@ fun RouteCardStatusCard(
     isSecretarySigned: Boolean,
     isJudgeSigned: Boolean,
     onMasterUnlock: () -> Unit,
-    onFillRouteCard: () -> Unit,
     onSecretarySign: () -> Unit,
     onJudgeSign: () -> Unit,
-    mode: TeamCardMode
+    mode: TeamCardMode,
+    isQuickEditMode: Boolean = false,
+    onToggleQuickEdit: () -> Unit = {},
+    routeCardEntries: List<RouteCardEntryUi> = emptyList(),
+    onCycleCheckpoint: (Long) -> Unit = {},
+    onTechnicalLongPress: (Long) -> Unit = {},
+    onShowTechDialog: (Long) -> Unit = {}
 ) {
     val isFinished = status == "finished"
     val isCancelled = status == "disqualified" || status == "lost"
     val isConfirmed = checkpointsEntered && !isMasterMode
-    val isInProgress = isFinished && !checkpointsEntered && !isCancelled && mode == TeamCardMode.EDIT
+    val isInProgress = isFinished && !checkpointsEntered && !isCancelled && (mode == TeamCardMode.EDIT || isQuickEditMode)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -192,6 +193,7 @@ fun RouteCardStatusCard(
                     Text(
                         text = when {
                             isMasterMode -> "👑 МАСТЕР-РЕЖИМ"
+                            isQuickEditMode -> "✏️ РЕДАКТИРОВАНИЕ"
                             isConfirmed -> "✅ ПУТЕВОЙ ЛИСТ"
                             isInProgress -> "📝 ПУТЕВОЙ ЛИСТ"
                             isCancelled -> "❌ ПУТЕВОЙ ЛИСТ"
@@ -201,6 +203,7 @@ fun RouteCardStatusCard(
                         fontSize = 14.sp,
                         color = when {
                             isMasterMode -> Color(0xFFF57C00)
+                            isQuickEditMode -> Color(0xFF2196F3)
                             isConfirmed -> Color(0xFF2E7D32)
                             isInProgress -> Color(0xFFFF8C00)
                             isCancelled -> Color(0xFFD32F2F)
@@ -208,24 +211,74 @@ fun RouteCardStatusCard(
                         }
                     )
                 }
-                Text(
-                    text = "${stats.takenCount}/${stats.totalCount}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = when {
-                        stats.takenCount == stats.totalCount && !isCancelled -> Color(0xFF2E7D32)
-                        stats.takenCount > 0 -> Color(0xFFFF8C00)
-                        else -> Color.Gray
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${stats.takenCount}/${stats.totalCount}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = when {
+                            stats.takenCount == stats.totalCount && !isCancelled -> Color(0xFF2E7D32)
+                            stats.takenCount > 0 -> Color(0xFFFF8C00)
+                            else -> Color.Gray
+                        }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    if (isFinished && !isMasterMode && !checkpointsEntered && !isQuickEditMode && mode != TeamCardMode.EDIT) {
+                        TextButton(
+                            onClick = onToggleQuickEdit,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "📝 ЗАПОЛНИТЬ",
+                                fontSize = 11.sp,
+                                color = Color(0xFF2196F3),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
-                )
+
+                    if (isQuickEditMode) {
+                        TextButton(
+                            onClick = onToggleQuickEdit,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "💾 СОХРАНИТЬ",
+                                fontSize = 11.sp,
+                                color = Color(0xFF2E7D32),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            if (isFinished && !isCancelled && routeCardEntries.isNotEmpty()) {
+                // Ключевой момент: кластеры кликабельны в мастер-режиме ИЛИ в режиме быстрого редактирования
+                val clustersEditable = isMasterMode || isQuickEditMode || mode == TeamCardMode.EDIT
+
+                InteractiveCheckpointsGrid(
+                    entries = routeCardEntries,
+                    isEditable = clustersEditable,
+                    onCycle = onCycleCheckpoint,
+                    onTechnicalLongPress = onTechnicalLongPress,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TechnicalDetailsRow(entries = routeCardEntries)
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             when {
                 isMasterMode -> {
                     Text(
-                        text = "Редактирование с сохранением подписей",
+                        text = "Редактирование с сохранением подписей. Нажмите 💾 СОХРАНИТЬ в верхней панели",
                         fontSize = 11.sp,
                         color = Color(0xFFF57C00)
                     )
@@ -241,6 +294,49 @@ fun RouteCardStatusCard(
                         modifier = Modifier.padding(start = 0.dp)
                     ) {
                         Text("🔓 Мастер-правка", fontSize = 11.sp, color = Color(0xFFF57C00))
+                    }
+                }
+                isQuickEditMode -> {
+                    Text(
+                        text = "👆 Тап по кружку — взять КП | Долгий тап на тех. КП — детали",
+                        fontSize = 10.sp,
+                        color = Color(0xFF2196F3)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = onSecretarySign,
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSecretarySigned,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSecretarySigned) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Text(
+                                text = if (isSecretarySigned) "✅ Подписано секретарём" else "📝 Подписать секретарём",
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = onJudgeSign,
+                            modifier = Modifier.weight(1f),
+                            enabled = !isJudgeSigned,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isJudgeSigned) Color(0xFF2E7D32) else MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            )
+                        ) {
+                            Text(
+                                text = if (isJudgeSigned) "✅ Подписано судьёй" else "⚖️ Подписать судьёй",
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
                 isInProgress -> {
@@ -274,7 +370,7 @@ fun RouteCardStatusCard(
                         Button(
                             onClick = onJudgeSign,
                             modifier = Modifier.weight(1f),
-                            enabled = !isJudgeSigned && isSecretarySigned,
+                            enabled = !isJudgeSigned,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isJudgeSigned) Color(0xFF2E7D32) else MaterialTheme.colorScheme.secondary,
                                 contentColor = MaterialTheme.colorScheme.onSecondary
@@ -287,19 +383,12 @@ fun RouteCardStatusCard(
                         }
                     }
                 }
-                !isCancelled && isFinished -> {
+                !isCancelled && isFinished && !checkpointsEntered -> {
                     Text(
-                        text = "Не заполнен",
+                        text = "Путевой лист не заполнен. Нажмите \"ЗАПОЛНИТЬ\" для начала",
                         fontSize = 11.sp,
-                        color = Color.Gray
+                        color = Color(0xFFFF8C00)
                     )
-                    Button(
-                        onClick = onFillRouteCard,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(vertical = 4.dp)
-                    ) {
-                        Text("📝 ЗАПОЛНИТЬ ПУТЕВОЙ ЛИСТ", fontSize = 12.sp)
-                    }
                 }
                 isCancelled -> {
                     Text(
@@ -313,36 +402,126 @@ fun RouteCardStatusCard(
     }
 }
 
-// ============================================================
-// ВИЗУАЛИЗАЦИЯ КП (КЛАСТЕРЫ)
-// ============================================================
+@Composable
+fun InteractiveCheckpointCluster(
+    checkpoint: RouteCardEntryUi,
+    isEditable: Boolean,
+    onCycle: () -> Unit,
+    onLongPress: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+
+    val state = when {
+        !checkpoint.taken -> "NOT_TAKEN"
+        checkpoint.taken && checkpoint.takenWithError -> "TAKEN_ERROR"
+        else -> "TAKEN_OK"
+    }
+
+    val targetColor = when (state) {
+        "NOT_TAKEN" -> Color(0xFF9E9E9E)
+        "TAKEN_OK" -> if (checkpoint.type == "technical") Color(0xFFF57C00) else Color(0xFF00A86B)
+        "TAKEN_ERROR" -> Color(0xFF9E9E9E)
+        else -> Color(0xFF9E9E9E)
+    }
+
+    val animatedColor by animateColorAsState(
+        targetValue = targetColor,
+        animationSpec = tween(durationMillis = 150),
+        label = "checkpointColor"
+    )
+
+    val icon = if (state == "TAKEN_ERROR") "❌" else ""
+    val showStar = state == "TAKEN_OK" && checkpoint.type == "technical"
+
+    Box(
+        modifier = modifier.size(56.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(animatedColor)
+                .pointerInput(isEditable, checkpoint.type) {
+                    detectTapGestures(
+                        onTap = {
+                            if (isEditable) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onCycle()
+                            }
+                        },
+                        onLongPress = {
+                            if (isEditable && checkpoint.type == "technical") {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongPress()
+                            }
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (icon.isNotEmpty()) {
+                Text(icon, fontSize = 20.sp, color = Color.White)
+            } else {
+                Text(
+                    text = checkpoint.displayNumber.toString(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        }
+
+        if (showStar) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 2.dp, y = (-6).dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⭐",
+                    fontSize = 15.sp,
+                    color = Color.Yellow
+                )
+            }
+        }
+    }
+}
 
 @Composable
-fun CheckpointsClusterGrid(
+fun InteractiveCheckpointsGrid(
     entries: List<RouteCardEntryUi>,
-    onCheckpointClick: ((RouteCardEntryUi) -> Unit)? = null
+    isEditable: Boolean,
+    onCycle: (Long) -> Unit,
+    onTechnicalLongPress: (Long) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val chunked = entries.chunked(6)
+    val rows = entries.chunked(6)
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        chunked.forEach { row ->
+        rows.forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                row.forEach { cp ->
-                    CheckpointCircle(
-                        checkpoint = cp,
-                        onClick = { onCheckpointClick?.invoke(cp) }
+                row.forEach { checkpoint ->
+                    InteractiveCheckpointCluster(
+                        checkpoint = checkpoint,
+                        isEditable = isEditable,
+                        onCycle = { onCycle(checkpoint.checkpointId) },
+                        onLongPress = { onTechnicalLongPress(checkpoint.checkpointId) },
+                        modifier = Modifier.size(56.dp)
                     )
                 }
                 repeat(6 - row.size) {
-                    Spacer(modifier = Modifier.size(40.dp))
+                    Spacer(modifier = Modifier.size(56.dp))
                 }
             }
         }
@@ -350,170 +529,270 @@ fun CheckpointsClusterGrid(
 }
 
 @Composable
-private fun CheckpointCircle(
-    checkpoint: RouteCardEntryUi,
-    onClick: () -> Unit
-) {
-    val color = when {
-        checkpoint.taken && checkpoint.takenWithError -> Color(0xFFFF8C00)
-        checkpoint.taken -> Color(0xFF00A86B)
-        else -> Color(0xFF9E9E9E)
-    }
-
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(color)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "${checkpoint.displayNumber}",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
-        if (checkpoint.type == "technical" && checkpoint.taken && !checkpoint.takenWithError) {
-            Text(
-                text = "*",
-                color = Color.White,
-                fontSize = 16.sp,
-                modifier = Modifier.align(Alignment.TopEnd)
-            )
-        }
-    }
-}
-
-// ============================================================
-// СПИСОК КП ДЛЯ РЕДАКТИРОВАНИЯ
-// ============================================================
-
-@Composable
-fun EditableCheckpointList(
+fun TechnicalDetailsRow(
     entries: List<RouteCardEntryUi>,
-    onTakenChange: (Long, Boolean) -> Unit,
-    onErrorChange: (Long, Boolean) -> Unit,
-    onOffsetTimeChange: (Long, String) -> Unit,
-    onPenaltyChange: (Long, Int) -> Unit,
-    isEditable: Boolean
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        entries.forEach { entry ->
-            EditableCheckpointRow(
-                entry = entry,
-                onTakenChange = { onTakenChange(entry.checkpointId, it) },
-                onErrorChange = { onErrorChange(entry.checkpointId, it) },
-                onOffsetTimeChange = { onOffsetTimeChange(entry.checkpointId, it) },
-                onPenaltyChange = { onPenaltyChange(entry.checkpointId, it) },
-                isEditable = isEditable
-            )
+    val technicalWithData = entries.filter { cp ->
+        cp.type == "technical" && (cp.offsetTime.isNotBlank() || cp.penalty != 0)
+    }
+
+    if (technicalWithData.isEmpty()) return
+
+    val detailsList = mutableListOf<String>()
+    var totalOffsetSeconds = 0
+
+    technicalWithData.forEach { cp ->
+        val parts = mutableListOf<String>()
+
+        if (cp.offsetTime.isNotBlank()) {
+            val seconds = parseOffsetTimeToSeconds(cp.offsetTime)
+            if (seconds != null) {
+                parts.add("${seconds} сек")
+                totalOffsetSeconds += seconds
+            } else {
+                parts.add(cp.offsetTime)
+            }
+        }
+
+        if (cp.penalty != 0) {
+            val sign = if (cp.penalty > 0) "-" else "+"
+            parts.add("${sign}${kotlin.math.abs(cp.penalty)}Б")
+        }
+
+        if (parts.isNotEmpty()) {
+            detailsList.add("⭐ КП-${cp.displayNumber} (${parts.joinToString(", ")})")
         }
     }
-}
 
-@Composable
-private fun EditableCheckpointRow(
-    entry: RouteCardEntryUi,
-    onTakenChange: (Boolean) -> Unit,
-    onErrorChange: (Boolean) -> Unit,
-    onOffsetTimeChange: (String) -> Unit,
-    onPenaltyChange: (Int) -> Unit,
-    isEditable: Boolean
-) {
-    val isTechnical = entry.type == "technical"
+    val totalMinutes = totalOffsetSeconds / 60
+    val totalSeconds = totalOffsetSeconds % 60
+    val totalFormatted = String.format("%02d мин %02d сек", totalMinutes, totalSeconds)
+
+    val detailsText = detailsList.joinToString(" | ") + " ||| ∑ $totalFormatted"
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (isTechnical) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            else MaterialTheme.colorScheme.surface
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        ),
+        shape = MaterialTheme.shapes.medium
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "№${entry.displayNumber}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    modifier = Modifier.width(40.dp)
-                )
-
-                Text(
-                    text = "Вес:${entry.weight}",
-                    fontSize = 12.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.width(60.dp)
-                )
-
-                Button(
-                    onClick = { onTakenChange(!entry.taken) },
-                    enabled = isEditable,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (entry.taken) Color(0xFF00A86B) else Color.Gray
-                    ),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(vertical = 4.dp)
-                ) {
-                    Text("ok", color = Color.White, fontSize = 12.sp)
-                }
-
-                Button(
-                    onClick = { onErrorChange(!entry.takenWithError) },
-                    enabled = isEditable && entry.taken,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (entry.takenWithError) Color(0xFFFF8C00) else Color.Gray
-                    ),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(vertical = 4.dp)
-                ) {
-                    Text("Ошибка", color = Color.White, fontSize = 12.sp)
-                }
-            }
-
-            if (isTechnical) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = entry.offsetTime,
-                        onValueChange = onOffsetTimeChange,
-                        label = { Text("Отсечка (ММ:СС)") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        enabled = isEditable && entry.taken
-                    )
-
-                    OutlinedTextField(
-                        value = entry.penalty.toString(),
-                        onValueChange = { it.toIntOrNull()?.let(onPenaltyChange) },
-                        label = { Text("Штраф") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        enabled = isEditable && entry.taken
-                    )
-                }
-            }
-        }
+        Text(
+            text = detailsText,
+            modifier = Modifier.padding(12.dp),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 14.sp
+        )
     }
 }
 
-// ============================================================
-// УЧАСТНИК
-// ============================================================
+private fun parseOffsetTimeToSeconds(offsetTime: String): Int? {
+    if (offsetTime.isBlank()) return null
+    val parts = offsetTime.split(":")
+    if (parts.size != 2) return null
+    val minutes = parts[0].toIntOrNull() ?: return null
+    val seconds = parts[1].toIntOrNull() ?: return null
+    return if (seconds in 0..59) minutes * 60 + seconds else null
+}
+
+@Composable
+fun TechnicalCheckpointDialog(
+    checkpoint: RouteCardEntryUi,
+    onSave: (offsetTime: String, penalty: Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var offsetTimeField by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = checkpoint.offsetTime,
+                selection = TextRange(checkpoint.offsetTime.length)
+            )
+        )
+    }
+    var penalty by remember { mutableStateOf(checkpoint.penalty.toString()) }
+
+    var offsetTimeError by remember { mutableStateOf<String?>(null) }
+    var penaltyError by remember { mutableStateOf<String?>(null) }
+
+    // Функция валидации времени
+    fun validateOffsetTime(time: String): Boolean {
+        if (time.isBlank()) return true  // Пустое поле допустимо
+        val pattern = Regex("^([0-5]?[0-9]):([0-5][0-9])$")
+        if (!pattern.matches(time)) {
+            offsetTimeError = "Используйте формат ММ:СС (00:00 - 59:59)"
+            return false
+        }
+        offsetTimeError = null
+        return true
+    }
+
+    // Функция валидации штрафа
+    fun validatePenalty(penaltyStr: String): Boolean {
+        if (penaltyStr.isBlank()) {
+            penaltyError = null
+            return true
+        }
+        val value = penaltyStr.toIntOrNull()
+        if (value == null) {
+            penaltyError = "Введите целое число"
+            return false
+        }
+        if (value < -999 || value > 999) {
+            penaltyError = "Штраф должен быть от -999 до 999"
+            return false
+        }
+        penaltyError = null
+        return true
+    }
+
+    // Проверяем, можно ли сохранять
+    val isOffsetTimeValid = validateOffsetTime(offsetTimeField.text)
+    val isPenaltyValid = validatePenalty(penalty)
+    val isSaveEnabled = isOffsetTimeValid && isPenaltyValid
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "КП-${checkpoint.displayNumber} (технический)",
+                fontSize = 20.sp
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = offsetTimeField,
+                    onValueChange = { newValue ->
+                        val digitsOnly = newValue.text.filter { it.isDigit() }
+                        val trimmed = digitsOnly.take(4)
+                        val formatted = when {
+                            trimmed.isEmpty() -> ""
+                            trimmed.length <= 2 -> trimmed
+                            else -> "${trimmed.take(2)}:${trimmed.drop(2).take(2)}"
+                        }
+                        offsetTimeField = TextFieldValue(
+                            text = formatted,
+                            selection = TextRange(formatted.length)
+                        )
+                        offsetTimeError = null
+                    },
+                    label = {
+                        Text(
+                            "Отсечка (ММ:СС)",
+                            fontSize = 14.sp
+                        )
+                    },
+                    placeholder = {
+                        Text(
+                            "мм:сс",
+                            fontSize = 14.sp,
+                            color = Color.Gray.copy(alpha = 0.4f)
+                        )
+                    },
+                    isError = offsetTimeError != null,
+                    supportingText = {
+                        Column {
+                            if (offsetTimeError != null) {
+                                Text(
+                                    text = offsetTimeError!!,
+                                    fontSize = 11.sp,
+                                    color = Color.Red
+                                )
+                            } else {
+                                Text(
+                                    text = "Пример: 01:30 (пустое поле = без отсечки)",
+                                    fontSize = 10.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 16.sp,
+                        fontFamily = FontFamily.Monospace  // моноширинный шрифт для времени
+                    )
+                )
+
+                OutlinedTextField(
+                    value = penalty,
+                    onValueChange = { newValue ->
+                        if (newValue.all { it.isDigit() || it == '-' } && newValue.length <= 5) {
+                            penalty = newValue
+                            penaltyError = null
+                        }
+                    },
+                    label = {
+                        Text(
+                            "Штраф (баллы)",
+                            fontSize = 16.sp
+                        )
+                    },
+                    placeholder = {
+                        Text(
+                            "5 или -3",
+                            fontSize = 18.sp
+                        )
+                    },
+                    isError = penaltyError != null,
+                    supportingText = {
+                        if (penaltyError != null) {
+                            Text(
+                                text = penaltyError!!,
+                                fontSize = 12.sp,
+                                color = Color.Red
+                            )
+                        } else {
+                            Text(
+                                text = "Положительный = бонус, отрицательный = штраф",
+                                fontSize = 10.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp)
+                )
+
+                Text(
+                    text = "💡 Отсечка всегда вычитается из времени. Формат: ММ:СС (минуты:секунды)",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                    lineHeight = 16.sp
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val penaltyInt = penalty.toIntOrNull() ?: 0
+                    onSave(offsetTimeField.text, penaltyInt)
+                },
+                enabled = isSaveEnabled
+            ) {
+                Text(
+                    "💾 СОХРАНИТЬ",
+                    fontSize = 16.sp
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    "Отмена",
+                    fontSize = 16.sp
+                )
+            }
+        }
+    )
+}
 
 @Composable
 fun MemberCard(
@@ -651,10 +930,6 @@ fun MemberCard(
     }
 }
 
-// ============================================================
-// ИСТОРИЯ ЗАМЕН
-// ============================================================
-
 @Composable
 fun ReplacedHistorySection(
     replacedMembers: List<String>,
@@ -704,10 +979,6 @@ fun ReplacedHistorySection(
         }
     }
 }
-
-// ============================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ============================================================
 
 private fun statusToText(status: String): String {
     return when (status) {

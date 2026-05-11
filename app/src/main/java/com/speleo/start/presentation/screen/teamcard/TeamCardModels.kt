@@ -17,14 +17,14 @@ data class TeamCardUiState(
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
     val competitionStartTimestamp: Long = 0L,
-    val isSecretarySigned: Boolean = false,   // ← ДОБАВЛЕНО
-    val isJudgeSigned: Boolean = false        // ← ДОБАВЛЕНО
+    val isSecretarySigned: Boolean = false,
+    val isJudgeSigned: Boolean = false
 )
 
 sealed class TeamCardMode {
-    object VIEW : TeamCardMode()                    // Обычный просмотр
-    object EDIT : TeamCardMode()                    // Редактирование ПЛ (до подписей)
-    object MASTER_EDIT : TeamCardMode()             // Мастер-правка (с сохранением подписей)
+    object VIEW : TeamCardMode()
+    object EDIT : TeamCardMode()
+    object MASTER_EDIT : TeamCardMode()
 }
 
 // ============================================================
@@ -56,7 +56,7 @@ data class MemberUi(
     val nickname: String?,
     val age: Int?,
     val phone: String?,
-    val role: String,  // "captain" / "member"
+    val role: String,
     val mentorName: String?,
     val mentorConfirmed: Boolean,
     val judgeApproved: Boolean
@@ -71,10 +71,10 @@ data class RouteCardEntryUi(
     val checkpointId: Long,
     val displayNumber: Int,
     val weight: Int,
-    val type: String,  // "normal" / "technical"
+    val type: String,
     val taken: Boolean,
     val takenWithError: Boolean,
-    val offsetTime: String,  // "MM:SS" или пустая строка
+    val offsetTime: String,
     val penalty: Int,
     val secretaryConfirmed: Boolean,
     val judgeConfirmed: Boolean
@@ -102,7 +102,8 @@ data class RelativeTimes(
 
 sealed class TeamCardUiEvent {
     data class ShowMessage(val message: String) : TeamCardUiEvent()
-    data class ShowMasterPasswordDialog(val onSuccess: () -> Unit) : TeamCardUiEvent()
     data class ShowFinishTimeDialog(val currentSeconds: Int) : TeamCardUiEvent()
+    data class ShowMasterPasswordDialog(val onConfirm: () -> Unit) : TeamCardUiEvent()
     object NavigateBack : TeamCardUiEvent()
+    object RouteCardLocked : TeamCardUiEvent()
 }
