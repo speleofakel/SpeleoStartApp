@@ -163,6 +163,11 @@ fun StartScreen(
                                 .padding(12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            val displayText = if (queue.isEmpty()) {
+                                "— : —"
+                            } else {
+                                formatCountdown(countdown)
+                            }
                             Text(
                                 text = formatCountdown(countdown),
                                 fontSize = if (countdown < 60) 40.sp else 32.sp,

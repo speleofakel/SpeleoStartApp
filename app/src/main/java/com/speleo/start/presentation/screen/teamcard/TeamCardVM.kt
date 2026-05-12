@@ -104,7 +104,7 @@ class TeamCardVM @Inject constructor(
 
         Timber.d("Team loaded: id=${team.id}, status=${team.status}, startTimestamp=${team.startTimestamp}, finishTimestamp=${team.finishTimestamp}, checkpointsEntered=${team.checkpointsEntered}")
 
-        val participants = participantRepo.getAllParticipantsByTeam(teamId).first()
+        val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
         val activeParticipants = participants.filter { it.status == "active" }
 
         val members = mutableListOf<MemberUi>()
@@ -744,6 +744,7 @@ class TeamCardVM @Inject constructor(
 
                 emitEvent(TeamCardUiEvent.ShowMessage("Участник заменён"))
                 loadData(teamId)
+                sharedState.refreshStartQueue()
             } catch (e: Exception) {
                 emitEvent(TeamCardUiEvent.ShowMessage("Ошибка: ${e.message}"))
             }
@@ -765,6 +766,7 @@ class TeamCardVM @Inject constructor(
                 participantRepo.updateParticipantStatus(participant.id, "free_agent")
                 emitEvent(TeamCardUiEvent.ShowMessage("Участник исключён"))
                 loadData(team.id)
+                sharedState.refreshStartQueue()
             } catch (e: Exception) {
                 emitEvent(TeamCardUiEvent.ShowMessage("Ошибка: ${e.message}"))
             }
@@ -892,7 +894,6 @@ class TeamCardVM @Inject constructor(
                 emitEvent(TeamCardUiEvent.ShowMessage("Ментор назначен"))
                 loadData(participant.teamId)
 
-
                 sharedState.refreshStartQueue()
 
             } catch (e: Exception) {
@@ -900,4 +901,50 @@ class TeamCardVM @Inject constructor(
             }
         }
     }
+
+    fun addMember(personId: Long) {
+        viewModelScope.launch {
+            val team = _uiState.value.teamInfo ?: return@launch
+            val existingInComp = participantRepo.findActiveByPersonAndComp(personId, team.id)
+            if (existingInComp != null) {
+                emitEvent(TeamCardUiEvent.ShowMessage("Участник уже в другой команде этого соревнования"))
+                return@launch
+            }
+
+            val participantId = participantRepo.addParticipant(
+                teamId = team.id,
+                personId = personId,
+                role = "member"
+            )
+            if (participantId != -1L) {
+                emitEvent(TeamCardUiEvent.ShowMessage("Участник добавлен"))
+                loadData(team.id)
+                sharedState.refreshStartQueue()
+            } else {
+                emitEvent(TeamCardUiEvent.ShowMessage("Ошибка добавления участника"))
+            }
+        }
+    }
+
+
+    fun toggleJudgeApproved(participantId: Long) {
+        viewModelScope.launch {
+            val participant = participantRepo.getParticipantById(participantId) ?: return@launch
+            val newStatus = !participant.judgeApproved
+
+            participantRepo.updateMentorAndFlags(
+                id = participant.id,
+                mentorId = participant.mentorId,
+                mentorConfirmed = participant.mentorConfirmed,
+                judgeApproved = newStatus
+            )
+
+            loadData(teamId)
+            sharedState.refreshStartQueue()
+            emitEvent(TeamCardUiEvent.ShowMessage(
+                if (newStatus) "✅ Разрешение судьи установлено" else "❌ Разрешение судьи снято"
+            ))
+        }
+    }
+
 }

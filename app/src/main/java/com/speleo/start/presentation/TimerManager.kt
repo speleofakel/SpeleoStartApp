@@ -229,7 +229,7 @@ class TimerManager @Inject constructor(
     }
 
     fun resetCountdown(seconds: Int, isFirst: Boolean = false) {
-        _countdown.value = if (isFirst) FIRST_START_COUNTDOWN else seconds
+        _countdown.value = seconds  // всегда используем переданные секунды
         _isFirstStart.value = isFirst
         _countdownPaused.value = false
         CoroutineScope(Dispatchers.IO).launch {
@@ -260,4 +260,25 @@ class TimerManager @Inject constructor(
             settingsDao.delete(KEY_CURRENT_INTERVAL)
         }
     }
+
+    fun pauseCountdown() {
+        if (!_countdownPaused.value && _countdown.value > 0) {
+            _countdownPaused.value = true
+            CoroutineScope(Dispatchers.IO).launch {
+                settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_PAUSED, "true"))
+            }
+        }
+    }
+
+    fun resumeCountdown() {
+        if (_countdownPaused.value) {
+            _countdownPaused.value = false
+            CoroutineScope(Dispatchers.IO).launch {
+                settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_PAUSED, "false"))
+            }
+            startCountdownLoop()
+        }
+    }
+
+
 }

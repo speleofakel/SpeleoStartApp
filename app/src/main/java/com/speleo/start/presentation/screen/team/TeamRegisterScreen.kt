@@ -1,5 +1,6 @@
 package com.speleo.start.presentation.screen.team
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -369,6 +370,7 @@ fun TeamRegisterScreen(
                             }
                         }
                     }
+                    // В диалоге выбора ментора, после результатов поиска
                     if (mentorResults.isEmpty()) {
                         Spacer(modifier = Modifier.height(12.dp))
 
@@ -376,46 +378,47 @@ fun TeamRegisterScreen(
                         var qFirst by remember { mutableStateOf("") }
                         val focusManager = LocalFocusManager.current
 
-                        TitleCaseTextField(
+                        OutlinedTextField(
                             value = qLast,
                             onValueChange = { qLast = it },
-                            label = "Фамилия ментора",
+                            label = { Text("Фамилия ментора") },
                             modifier = Modifier.fillMaxWidth(),
-                            imeAction = ImeAction.Next,
-                            onNext = {
-                                // Пробел или Enter → переход на поле "Имя ментора"
-                                focusManager.moveFocus(FocusDirection.Down)
-                            }
+                            singleLine = true
                         )
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        TitleCaseTextField(
+                        OutlinedTextField(
                             value = qFirst,
                             onValueChange = { qFirst = it },
-                            label = "Имя ментора",
+                            label = { Text("Имя ментора") },
                             modifier = Modifier.fillMaxWidth(),
-                            imeAction = ImeAction.Done,
-                            onNext = {
-                                // Пробел или Enter → убираем клавиатуру
-                                focusManager.clearFocus()
-                            }
+                            singleLine = true
                         )
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Button(
                             onClick = {
                                 if (qLast.isNotBlank() && qFirst.isNotBlank()) {
-                                    vm.createQuickMentor(lastName = qLast, firstName = qFirst) { newId ->
-                                        vm.getPersonById(newId) { person ->
-                                            person?.let {
+                                    // Сначала создаём ментора
+                                    vm.createQuickMentor(lastName = qLast, firstName = qFirst) { newPersonId ->
+                                        // После создания получаем ID новой персоны
+                                        vm.getPersonById(newPersonId) { person ->
+                                            if (person != null) {
+                                                // Обновляем список членов команды
                                                 members = members.toMutableList().also { list ->
-                                                    list[memberIndex] = list[memberIndex].copy(mentor = person, mentorConfirmed = true)
+                                                    list[memberIndex] = list[memberIndex].copy(
+                                                        mentor = person,
+                                                        mentorConfirmed = true
+                                                    )
                                                 }
+                                                // Закрываем диалог
+                                                showMentorPickerFor = null
+                                                mentorSearchQuery = ""
+                                                vm.onMentorSearchQueryChange("")
+                                                // Показываем сообщение об успехе
+
                                             }
                                         }
-                                        showMentorPickerFor = null
-                                        mentorSearchQuery = ""
-                                        vm.onMentorSearchQueryChange("")
                                     }
                                 }
                             },

@@ -257,6 +257,8 @@ fun TeamCardScreen(
                             showReplaceDialog = Pair(member.participantId, "${member.lastName} ${member.firstName}")
                         },
                         onRemove = { vm.removeMember(member.participantId) },
+                        onToggleJudgeApproved = { vm.toggleJudgeApproved(member.participantId) },
+
                         onAssignMentor = {
                             showMentorDialog = Pair(member.participantId, "${member.lastName} ${member.firstName}")
                         }

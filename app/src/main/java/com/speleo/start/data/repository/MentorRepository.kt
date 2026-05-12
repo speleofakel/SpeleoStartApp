@@ -16,6 +16,9 @@ class MentorRepository @Inject constructor(
     suspend fun getMentorByParticipantId(participantId: Long): MentorEntity? =
         mentorDao.getMentorByParticipantId(participantId)
 
+    suspend fun getMentorById(id: Long): MentorEntity? = mentorDao.getMentorById(id)
+
+
     suspend fun createMentor(personId: Long): Long {
         val mentor = MentorEntity(personId = personId)
         return mentorDao.insert(mentor)

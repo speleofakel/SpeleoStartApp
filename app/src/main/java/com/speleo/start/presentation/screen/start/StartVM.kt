@@ -1,9 +1,11 @@
 package com.speleo.start.presentation.screen.start
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.speleo.start.data.local.PreferencesManager
 import com.speleo.start.data.repository.CompetitionRepository
+import com.speleo.start.data.repository.MentorRepository
 import com.speleo.start.data.repository.ParticipantRepository
 import com.speleo.start.data.repository.PersonRepository
 import com.speleo.start.data.repository.TeamRepository
@@ -62,7 +64,8 @@ class StartVM @Inject constructor(
     private val competitionRepo: CompetitionRepository,
     private val prefs: PreferencesManager,
     val timer: TimerManager,
-    private val sharedState: SharedState
+    private val sharedState: SharedState,
+    private val mentorRepo: MentorRepository
 ) : ViewModel() {
 
     private val _queue = MutableStateFlow<List<StartTeamInfo>>(emptyList())
@@ -92,6 +95,7 @@ class StartVM @Inject constructor(
         viewModelScope.launch {
             sharedState.shouldRefreshStartQueue.collect {
                 if (it > 0) {
+                    Log.d("START_DEBUG", "Refreshing queue because sharedState changed")
                     loadQueue()
                 }
             }
@@ -170,24 +174,33 @@ class StartVM @Inject constructor(
                     }
                     result
                 }
-                .collect { _queue.value = it }
+                .collect { queueList ->
+                    _queue.value = queueList
+
+                    if (queueList.isEmpty() && timer.started.value) {
+                        timer.pauseCountdown()
+                    } else if (queueList.isNotEmpty() && timer.countdownPaused.value) {
+                        timer.resumeCountdown()
+                    }
+                }
         }
     }
 
     private suspend fun enrichTeamInfo(team: com.speleo.start.data.local.entity.TeamEntity): StartTeamInfo {
-        val participants = participantRepo.getParticipantsByTeam(team.id).first()
+        val participants = participantRepo.getActiveParticipantsByTeam(team.id).first()
 
         val memberInfos = mutableListOf<StartMemberInfo>()
         for (participant in participants) {
             val person = personRepo.getPersonById(participant.personId)
             val age = person?.let { calculateAge(it.birthDate) } ?: 0
 
-            val mentor = participant.mentorId?.let { mid ->
-                personRepo.getPersonById(mid)
-            }
-
-            val mentorName = mentor?.let { m ->
-                "${m.lastName} ${m.firstName.firstOrNull()?.plus(".") ?: ""}"
+            var mentorName: String? = null
+            if (participant.mentorId != null) {
+                val mentorEntity = mentorRepo.getMentorById(participant.mentorId)
+                if (mentorEntity != null) {
+                    val mentorPerson = personRepo.getPersonById(mentorEntity.personId)
+                    mentorName = mentorPerson?.let { "${it.lastName} ${it.firstName.firstOrNull()?.plus(".") ?: ""}" }
+                }
             }
 
             memberInfos.add(
@@ -216,12 +229,7 @@ class StartVM @Inject constructor(
             member.age < 14 && !member.judgeApproved
         }
 
-        val hasInactive = participants.any { participant ->
-            participant.status != "active"
-        }
-
         val colorMark = when {
-            hasInactive -> "СНЯТЫ"
             hasChildWithoutPermission -> "<14 !!!"
             memberInfos.any { it.age < 14 } -> "<14ок"
             memberInfos.any { it.age in 14..17 && !it.mentorConfirmed } -> "<17 !!!"
@@ -236,7 +244,7 @@ class StartVM @Inject constructor(
             members = memberInfos,
             memberCount = participants.size,
             hasMentorIssues = hasMentorIssues,
-            hasInactiveMembers = hasInactive,
+            hasInactiveMembers = false,
             hasChildWithoutPermission = hasChildWithoutPermission,
             colorMark = colorMark,
             isReady = false
@@ -270,21 +278,11 @@ class StartVM @Inject constructor(
 
             val first = currentQueue.first()
 
-            val cid = prefs.activeCompetitionId
-            val allTeams = teamRepo.getTeamsByCompetition(cid).first()
-            val startedCount = allTeams.count { it.status == "started" }
-
-            if (startedCount == 0) {
-                _validationError.value = StartValidationError(
-                    message = "Нельзя пропустить первую команду",
-                    canProceed = false
-                )
-                return@launch
-            }
-
+            // Принудительно перемещаем команду в конец очереди
             teamRepo.incrementSkipCount(first.id)
             timer.resetCountdown(_startInterval.value)
             loadQueue()
+            _validationError.value = null
         }
     }
 
@@ -294,6 +292,7 @@ class StartVM @Inject constructor(
             if (currentQueue.isEmpty()) return@launch
 
             val first = currentQueue.first()
+            Log.d("START_DEBUG", "Start team #${first.number}, hasMentorIssues: ${first.hasMentorIssues}, hasChildWithoutPermission: ${first.hasChildWithoutPermission}")
 
             val cid = prefs.activeCompetitionId
             val comp = competitionRepo.getCompetitionById(cid) ?: return@launch
@@ -315,13 +314,13 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
-            if (first.hasChildWithoutPermission) {
+            /*if (first.hasChildWithoutPermission) {
                 _validationError.value = StartValidationError(
                     message = "Нет разрешения судьи для участников до 14 лет",
                     canProceed = false
                 )
                 return@launch
-            }
+            }*/
 
             if (first.hasMentorIssues) {
                 _validationError.value = StartValidationError(
@@ -334,8 +333,8 @@ class StartVM @Inject constructor(
             teamRepo.updateTeamStatus(first.id, "started")
             teamRepo.setStartTimestamp(first.id, System.currentTimeMillis())
 
-            val isFirst = !timer.isFirstStart.value
-            timer.resetCountdown(_startInterval.value, isFirst = isFirst)
+            val nextInterval = _startInterval.value
+            timer.resetCountdown(nextInterval, isFirst = false)
 
             loadQueue()
             _validationError.value = null

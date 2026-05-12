@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -801,6 +802,7 @@ fun MemberCard(
     onReplace: () -> Unit,
     onRemove: () -> Unit,
     onAssignMentor: () -> Unit,
+    onToggleJudgeApproved: () -> Unit,
     canEdit: Boolean
 ) {
     val ageColor = when {
@@ -900,6 +902,23 @@ fun MemberCard(
                     color = Color(0xFF2E7D32)
                 )
             }
+
+            if (member.age != null && member.age < 14) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = member.judgeApproved,
+                        onCheckedChange = { onToggleJudgeApproved() },  // <-- ВЫЗОВ
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Text(
+                        text = if (member.judgeApproved) "✅ Разрешено судьёй" else "⭕ Нет разрешения судьи",
+                        fontSize = 12.sp,
+                        color = if (member.judgeApproved) Color(0xFF2E7D32) else Color(0xFFD32F2F)
+                    )
+                }
+            }
+
 
             if (canEdit) {
                 Spacer(modifier = Modifier.height(8.dp))

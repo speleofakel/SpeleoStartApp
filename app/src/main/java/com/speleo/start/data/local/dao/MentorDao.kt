@@ -10,7 +10,8 @@ interface MentorDao {
 
     @Query("SELECT * FROM mentors WHERE personId = :personId")
     suspend fun getMentorByPersonId(personId: Long): MentorEntity?
-
+    @Query("SELECT * FROM mentors WHERE id = :id")
+    suspend fun getMentorById(id: Long): MentorEntity?
     @Query("""
         SELECT m.* FROM mentors m
         JOIN participants p ON m.id = p.mentorId
