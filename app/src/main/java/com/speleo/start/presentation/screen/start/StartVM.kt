@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -161,28 +160,34 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
-            teamRepo.getRegisteredTeamsByClass(cid, "2")
-                .combine(teamRepo.getRegisteredTeamsByClass(cid, "3")) { c2, c3 ->
-                    val maxSize = maxOf(c2.size, c3.size)
-                    val result = mutableListOf<StartTeamInfo>()
-                    for (i in 0 until maxSize) {
-                        if (i < c2.size) result.add(enrichTeamInfo(c2[i]))
-                        if (i < c3.size) result.add(enrichTeamInfo(c3[i]))
-                    }
-                    if (result.isNotEmpty()) {
-                        result[0] = result[0].copy(isReady = true)
-                    }
-                    result
-                }
-                .collect { queueList ->
-                    _queue.value = queueList
+            // Получаем все зарегистрированные команды из БД
+            val class2 = teamRepo.getRegisteredTeamsByClass(cid, "2").first()
+            val class3 = teamRepo.getRegisteredTeamsByClass(cid, "3").first()
 
-                    if (queueList.isEmpty() && timer.started.value) {
-                        timer.pauseCountdown()
-                    } else if (queueList.isNotEmpty() && timer.countdownPaused.value) {
-                        timer.resumeCountdown()
-                    }
-                }
+            // Формируем плоский список с чередованием 2 → 3 → 2 → 3
+            val rawQueue = mutableListOf<com.speleo.start.data.local.entity.TeamEntity>()
+            val maxSize = maxOf(class2.size, class3.size)
+            for (i in 0 until maxSize) {
+                if (i < class2.size) rawQueue.add(class2[i])
+                if (i < class3.size) rawQueue.add(class3[i])
+            }
+
+            // Обогащаем информацией об участниках
+            val result = rawQueue.map { enrichTeamInfo(it) }.toMutableList()
+
+            // Помечаем первую команду как "готовится"
+            if (result.isNotEmpty()) {
+                result[0] = result[0].copy(isReady = true)
+            }
+
+            _queue.value = result
+
+            // Управляем таймером в зависимости от наличия очереди
+            if (result.isEmpty() && timer.started.value) {
+                timer.pauseCountdown()
+            } else if (result.isNotEmpty() && timer.countdownPaused.value) {
+                timer.resumeCountdown()
+            }
         }
     }
 
@@ -273,25 +278,40 @@ class StartVM @Inject constructor(
 
     fun skipCurrentTeam() {
         viewModelScope.launch {
-            val currentQueue = _queue.value
+            val currentQueue = _queue.value.toMutableList()
             if (currentQueue.isEmpty()) return@launch
 
-            val first = currentQueue.first()
+            val skipped = currentQueue.removeAt(0)
+            Log.d("START_DEBUG", "Skip team #${skipped.number}")
 
-            // Принудительно перемещаем команду в конец очереди
-            teamRepo.incrementSkipCount(first.id)
-            timer.resetCountdown(_startInterval.value)
-            loadQueue()
+            // Пропущенную команду отправляем в конец очереди
+            currentQueue.add(skipped)
+
+            // Пересчитываем флаг isReady
+            if (currentQueue.isNotEmpty()) {
+                currentQueue[0] = currentQueue[0].copy(isReady = true)
+            }
+
+            _queue.value = currentQueue
+
+            // ✅ Сбрасываем таймер только если есть команды в очереди
+            if (currentQueue.isNotEmpty()) {
+                timer.resetCountdown(_startInterval.value)
+            } else {
+                timer.pauseCountdown()
+                timer.resetCountdown(0)
+            }
+
             _validationError.value = null
         }
     }
 
     fun startCurrentTeam() {
         viewModelScope.launch {
-            val currentQueue = _queue.value
+            val currentQueue = _queue.value.toMutableList()
             if (currentQueue.isEmpty()) return@launch
 
-            val first = currentQueue.first()
+            val first = currentQueue[0]
             Log.d("START_DEBUG", "Start team #${first.number}, hasMentorIssues: ${first.hasMentorIssues}, hasChildWithoutPermission: ${first.hasChildWithoutPermission}")
 
             val cid = prefs.activeCompetitionId
@@ -314,13 +334,14 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
-            /*if (first.hasChildWithoutPermission) {
-                _validationError.value = StartValidationError(
-                    message = "Нет разрешения судьи для участников до 14 лет",
-                    canProceed = false
-                )
-                return@launch
-            }*/
+            // Временно отключено
+            // if (first.hasChildWithoutPermission) {
+            //     _validationError.value = StartValidationError(
+            //         message = "Нет разрешения судьи для участников до 14 лет",
+            //         canProceed = false
+            //     )
+            //     return@launch
+            // }
 
             if (first.hasMentorIssues) {
                 _validationError.value = StartValidationError(
@@ -330,25 +351,48 @@ class StartVM @Inject constructor(
                 return@launch
             }
 
+            // Стартуем команду в БД
             teamRepo.updateTeamStatus(first.id, "started")
             teamRepo.setStartTimestamp(first.id, System.currentTimeMillis())
 
-            val nextInterval = _startInterval.value
-            timer.resetCountdown(nextInterval, isFirst = false)
+            // Удаляем стартовавшую команду из очереди
+            currentQueue.removeAt(0)
 
-            loadQueue()
+            // Обновляем очередь
+            if (currentQueue.isNotEmpty()) {
+                currentQueue[0] = currentQueue[0].copy(isReady = true)
+                _queue.value = currentQueue
+                // Сбрасываем таймер только если есть следующая команда
+                timer.resetCountdown(_startInterval.value, isFirst = false)
+            } else {
+                // Очередь пуста — останавливаем таймер
+                _queue.value = emptyList()
+                timer.pauseCountdown()
+                // Сбрасываем таймер на 0 в UI
+                timer.resetCountdown(0, isFirst = false)
+            }
+
             _validationError.value = null
         }
     }
 
     fun disqualifyCurrentTeam() {
         viewModelScope.launch {
-            val currentQueue = _queue.value
+            val currentQueue = _queue.value.toMutableList()
             if (currentQueue.isEmpty()) return@launch
-            val first = currentQueue.first()
+
+            val first = currentQueue.removeAt(0)
             teamRepo.updateTeamStatus(first.id, "disqualified")
-            timer.resetCountdown(_startInterval.value)
-            loadQueue()
+
+            if (currentQueue.isNotEmpty()) {
+                currentQueue[0] = currentQueue[0].copy(isReady = true)
+                _queue.value = currentQueue
+                timer.resetCountdown(_startInterval.value)
+            } else {
+                _queue.value = emptyList()
+                timer.pauseCountdown()
+                timer.resetCountdown(0)
+            }
         }
     }
 
@@ -363,4 +407,12 @@ class StartVM @Inject constructor(
     fun clearValidationError() {
         _validationError.value = null
     }
+
+    fun startCountdownManually() {
+        if (_queue.value.isNotEmpty() && timer.countdown.value == 0) {
+            timer.resetCountdown(_startInterval.value, isFirst = false)
+        }
+    }
+
+
 }

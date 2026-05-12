@@ -15,9 +15,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -30,15 +32,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -46,8 +48,11 @@ fun FinishScreen(
     onBack: () -> Unit,
     vm: FinishVM = hiltViewModel()
 ) {
-    val teams by vm.startedTeams.collectAsStateWithLifecycle()
+    val allTeams by vm.allTeams.collectAsStateWithLifecycle()
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+    val filteredTeams by vm.filteredTeams.collectAsStateWithLifecycle()
     val selectedIds by vm.selectedIds.collectAsStateWithLifecycle()
+
     var showTimeAdjustDialog by remember { mutableStateOf<Long?>(null) }
     var adjustingTeamNumber by remember { mutableStateOf(0) }
     var adjustingTeamId by remember { mutableStateOf<Long?>(null) }
@@ -64,35 +69,73 @@ fun FinishScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Финиш") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("← Назад") } }
+                title = { Text("Финиш", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    TextButton(onClick = onBack) {
+                        Text("◀", fontSize = 18.sp)
+                    }
+                }
             )
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
         ) {
-            Text("Выберите команды:", fontSize = 16.sp)
+            // Поле поиска
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { vm.onSearchQueryChange(it) },
+                label = { Text("🔍 Поиск по номеру или фамилии") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        TextButton(onClick = { vm.onSearchQueryChange("") }) {
+                            Text("✖️", fontSize = 14.sp)
+                        }
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Счётчик выбранных команд
+            Text(
+                text = "Выбрано команд: ${selectedIds.size}",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (selectedIds.isNotEmpty()) Color(0xFF00A86B) else Color.Gray
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (teams.isEmpty()) {
-                Text("Нет команд на дистанции", fontSize = 16.sp)
+            if (allTeams.isEmpty()) {
+                Text(
+                    text = "Нет команд на дистанции",
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(32.dp)
+                )
             } else {
-                LazyColumn {
-                    items(teams, key = { it.id }) { team ->
+                // Список команд с прокруткой
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(filteredTeams, key = { it.id }) { team ->
                         val isSelected = selectedIds.contains(team.id)
                         val interactionSource = remember { MutableInteractionSource() }
 
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 2.dp)
                                 .combinedClickable(
                                     interactionSource = interactionSource,
                                     indication = null,
                                     onClick = { vm.toggleSelection(team.id) },
                                     onLongClick = {
-                                        // ✅ ДОБАВЛЕНА КОРРЕКТИРОВКА ВРЕМЕНИ
                                         if (team.hasFinished) {
                                             adjustingTeamId = team.id
                                             adjustingTeamNumber = team.number
@@ -102,23 +145,50 @@ fun FinishScreen(
                                             showTimeAdjustDialog = team.id
                                         }
                                     }
-                                )
+                                ),
+                            colors = androidx.compose.material3.CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                }
+                            )
                         ) {
-                            Row(modifier = Modifier.padding(12.dp)) {
-                                Checkbox(checked = isSelected, onCheckedChange = null)
-                                Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = { vm.toggleSelection(team.id) }
+                                )
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
                                     Text(
-                                        "№${team.number} (${team.className}-й кл)",
-                                        fontSize = 16.sp
+                                        text = "№${team.number} (${team.className}-й класс)",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = team.members,
+                                        fontSize = 13.sp,
+                                        color = Color.Gray,
+                                        maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                     if (team.hasFinished) {
                                         Text(
-                                            "📌 Долгий тап для корректировки времени",
+                                            text = "📌 Долгий тап для корректировки времени",
                                             fontSize = 10.sp,
-                                            color = androidx.compose.ui.graphics.Color.Gray
+                                            color = Color.Gray
                                         )
                                     }
                                 }
+                                // Цветовая метка
+                                ColorMarkLabel(colorMark = team.colorMark)
                             }
                         }
                     }
@@ -127,12 +197,21 @@ fun FinishScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Кнопка подтверждения — всегда видна внизу
             Button(
                 onClick = { vm.confirmFinish() },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = selectedIds.isNotEmpty()
+                enabled = selectedIds.isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedIds.isNotEmpty()) Color(0xFF00A86B) else Color.Gray
+                )
             ) {
-                Text("ПОДТВЕРДИТЬ ФИНИШ (${selectedIds.size})")
+                Text(
+                    text = "ПОДТВЕРДИТЬ ФИНИШ (${selectedIds.size})",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
             }
         }
     }
@@ -147,8 +226,10 @@ fun FinishScreen(
             title = { Text("Корректировка времени финиша") },
             text = {
                 Column {
-                    Text("Команда №$adjustingTeamNumber", fontSize = 14.sp)
+                    Text("Команда №$adjustingTeamNumber", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
+                    Text("Введите относительное время от старта соревнования", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -182,6 +263,12 @@ fun FinishScreen(
                             singleLine = true
                         )
                     }
+                    Text(
+                        text = "Формат: ЧЧ:ММ:СС (пример: 01:45:30)",
+                        fontSize = 10.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             },
             confirmButton = {
@@ -220,6 +307,31 @@ fun FinishScreen(
                     Text("Отмена")
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun ColorMarkLabel(colorMark: String) {
+    val (bgColor, textColor) = when (colorMark) {
+        "18+" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
+        "14+", "<14ок" -> Color(0xFFFFF3E0) to Color(0xFFF57C00)
+        "<17 !!!", "<14 !!!" -> Color(0xFFFFEBEE) to Color(0xFFD32F2F)
+        "СНЯТЫ" -> Color(0xFFFFEBEE) to Color(0xFFB71C1C)
+        else -> Color(0xFFE0E0E0) to Color.Gray
+    }
+
+    androidx.compose.material3.Card(
+        modifier = Modifier,
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = bgColor),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+    ) {
+        Text(
+            text = colorMark,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = textColor
         )
     }
 }

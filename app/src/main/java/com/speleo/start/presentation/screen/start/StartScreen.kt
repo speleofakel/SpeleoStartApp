@@ -163,11 +163,6 @@ fun StartScreen(
                                 .padding(12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            val displayText = if (queue.isEmpty()) {
-                                "— : —"
-                            } else {
-                                formatCountdown(countdown)
-                            }
                             Text(
                                 text = formatCountdown(countdown),
                                 fontSize = if (countdown < 60) 40.sp else 32.sp,
@@ -187,6 +182,19 @@ fun StartScreen(
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+
+                            // ✅ НОВАЯ КНОПКА: ручной запуск отсчёта
+                            if (queue.isNotEmpty() && countdown == 0 && !countdownPaused) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Button(
+                                    onClick = { vm.startCountdownManually() },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B))
+                                ) {
+                                    Text("▶ ЗАПУСТИТЬ ОТСЧЁТ", fontSize = 11.sp, color = Color.White)
+                                }
                             }
 
                             if (countdown > 10) {
@@ -616,7 +624,7 @@ private fun ActiveTeamCard(
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
                     contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
-                    Text("СНЯТЬ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("СНЯТЬ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
                 Button(
                     onClick = onSkip,
@@ -632,7 +640,7 @@ private fun ActiveTeamCard(
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B)),
                     contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
-                    Text("СТАРТ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    Text("СТАРТ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
