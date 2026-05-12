@@ -195,22 +195,22 @@ class TimerManager @Inject constructor(
                     val currentValue = _countdown.value
 
                     if (currentValue > 0) {
-                        // Звучит ПЕРЕД уменьшением: когда на экране N секунд
-                        if (currentValue in 1..10) {
+                        // Звук для 1-5 секунд (перед уменьшением)
+                        if (currentValue in 1..5) {
                             playCountdownBeep(currentValue)
                         }
 
                         _countdown.value = currentValue - 1
                         settingsDao.put(AppSettingsEntity(KEY_COUNTDOWN_VALUE, _countdown.value.toString()))
-
-                        // Финальный сигнал при достижении 0
-                        if (_countdown.value == 0) {
-                            playCountdownBeep(0)
-                        }
                     }
                 } else {
                     delay(100)
                 }
+            }
+
+            // Финальный сигнал после выхода из цикла (когда countdown стал 0)
+            if (_countdown.value == 0 && _started.value) {
+                playCountdownBeep(0)
             }
         }
     }
