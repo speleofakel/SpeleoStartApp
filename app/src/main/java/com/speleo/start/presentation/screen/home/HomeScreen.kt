@@ -1,5 +1,10 @@
 package com.speleo.start.presentation.screen.home
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -45,11 +50,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.speleo.start.presentation.Screen
@@ -81,9 +88,10 @@ val AllMenuTiles = listOf(
 @Composable
 fun HomeScreen(
     onNavigate: (Screen) -> Unit,
-    onNavigateToTeamCard: (Long, Boolean) -> Unit, // teamId, openQuickEdit
+    onNavigateToTeamCard: (Long, Boolean) -> Unit,
     homeVM: HomeVM = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val columns = if (configuration.screenWidthDp >= 600) 3 else 2
     var showDevMenu by remember { mutableStateOf(false) }
@@ -97,9 +105,28 @@ fun HomeScreen(
     val isArchived by homeVM.isArchived.collectAsStateWithLifecycle()
     val mainTimer by homeVM.mainTimer.collectAsStateWithLifecycle()
     val stats by homeVM.stats.collectAsStateWithLifecycle()
-    val pendingTeams by homeVM.pendingTeams.collectAsStateWithLifecycle() // Команды для диалога
+    val pendingTeams by homeVM.pendingTeams.collectAsStateWithLifecycle()
     val pendingRouteCards by homeVM.pendingRouteCards.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Лаунчер для импорта (выбор файла)
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            val jsonString = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText()
+            jsonString?.let { json -> homeVM.importData(json) }
+        }
+    }
+
+    // Лаунчер для разрешения на запись
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            homeVM.exportData()
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("Нужно разрешение для сохранения файла")
+            }
+        }
+    }
 
     LaunchedEffect(hasActiveCompetition, isArchived) {
         if (hasActiveCompetition && !isArchived) {
@@ -111,7 +138,6 @@ fun HomeScreen(
         }
     }
 
-    // Фильтруем плитки: если нет активного соревнования или архив, показываем только базовые
     val visibleTiles = if (!hasActiveCompetition || isArchived) {
         AllMenuTiles.filter { it.title == "Соревнования" || it.title == "Персоны" || it.title == "Настройки" }
     } else {
@@ -132,14 +158,14 @@ fun HomeScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 ),
-                modifier = Modifier.height(52.dp) // Уменьшенная высота
+                modifier = Modifier.height(52.dp)
             )
         }
     ) { paddingValues ->
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
-            horizontalArrangement = Arrangement.spacedBy(6.dp), // Уменьшено вдвое (было 12)
-            verticalArrangement = Arrangement.spacedBy(6.dp),   // Уменьшено вдвое
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             contentPadding = PaddingValues(
                 start = 8.dp, end = 8.dp,
                 top = paddingValues.calculateTopPadding() + 4.dp,
@@ -273,7 +299,6 @@ fun HomeScreen(
             }
 
             items(visibleTiles) { tile ->
-                // Динамическое обновление subtitle для плитки "Путевые"
                 val dynamicSubtitle = when {
                     tile.title == "Путевые" && pendingRouteCards.second > 0 ->
                         "${pendingRouteCards.first}/${pendingRouteCards.second}"
@@ -311,10 +336,29 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    OutlinedButton(onClick = { homeVM.exportData() }, modifier = Modifier.weight(1f)) {
+                    // Кнопка экспорта с проверкой разрешения
+                    OutlinedButton(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                                    homeVM.exportData()
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                                }
+                            } else {
+                                homeVM.exportData()
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Text("📤 Экспорт", fontSize = 12.sp)
                     }
-                    OutlinedButton(onClick = { homeVM.importData() }, modifier = Modifier.weight(1f)) {
+
+                    // Кнопка импорта
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("application/json")) },
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Text("📥 Импорт", fontSize = 12.sp)
                     }
                 }
@@ -322,7 +366,7 @@ fun HomeScreen(
         }
     }
 
-    // Dev меню (без изменений)
+    // Dev меню
     if (showDevMenu) {
         AlertDialog(
             onDismissRequest = { showDevMenu = false },
@@ -345,7 +389,7 @@ fun HomeScreen(
         )
     }
 
-    // Диалог остановки таймера (без изменений)
+    // Диалог остановки таймера
     if (showStopTimerDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -395,7 +439,7 @@ fun HomeScreen(
         )
     }
 
-    // НОВЫЙ ДИАЛОГ выбора команды для путевого листа
+    // Диалог выбора команды для путевого листа
     if (showTeamPickerDialog) {
         AlertDialog(
             onDismissRequest = { showTeamPickerDialog = false },
@@ -417,7 +461,7 @@ fun HomeScreen(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
                                             onClick = {
-                                                onNavigateToTeamCard(team.id, true) // openQuickEdit = true
+                                                onNavigateToTeamCard(team.id, true)
                                                 showTeamPickerDialog = false
                                             }
                                         ),
@@ -432,7 +476,6 @@ fun HomeScreen(
                                             .padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Левая часть: номер команды в квадрате
                                         Box(
                                             modifier = Modifier
                                                 .width(48.dp)
@@ -453,7 +496,6 @@ fun HomeScreen(
 
                                         Spacer(modifier = Modifier.width(12.dp))
 
-                                        // Правая часть: класс + фамилии
                                         Column(
                                             modifier = Modifier.weight(1f)
                                         ) {
@@ -588,7 +630,7 @@ fun MenuTileCard(
                 MaterialTheme.colorScheme.surfaceVariant
             }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp) // Добавлена тень
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
             modifier = Modifier
