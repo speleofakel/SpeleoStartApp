@@ -378,12 +378,12 @@ class HomeVM @Inject constructor(
                 val jsonString = exportData.toString(2)
                 val fileName = "speleo_export_${competition.shortName}_${System.currentTimeMillis()}.json"
 
-                // Сохраняем в Documents
-                val documentsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS)
-                if (!documentsDir.exists()) {
-                    documentsDir.mkdirs()
+                // Сохраняем в Downloads (не требует разрешения)
+                val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs()
                 }
-                val file = File(documentsDir, fileName)
+                val file = File(downloadsDir, fileName)
                 file.writeText(jsonString)
 
                 _event.emit(HomeUiEvent.ShowMessage("Экспорт сохранён: ${file.absolutePath}"))

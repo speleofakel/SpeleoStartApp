@@ -235,10 +235,10 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedButton(
-                                    onClick = { onNavigate(Screen.Competitions) },
-                                    modifier = Modifier.fillMaxWidth()
+                                    onClick = { homeVM.exportData() },
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("ВЫБРАТЬ ДРУГОЕ СОРЕВНОВАНИЕ")
+                                    Text("📤 Экспорт", fontSize = 12.sp)
                                 }
                             }
                         }
